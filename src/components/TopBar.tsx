@@ -1,26 +1,114 @@
-import { useEffect } from "react";
-import { useThemeStore } from "../stores/theme";
+//! 顶栏：目录名 + 打开目录/刷新/新建文件 + 主题切换
 
-/** 顶栏：应用标题 + 主题切换（后续 M2+ 加新建/刷新/大纲开关等） */
+import { useEffect } from "react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { useThemeStore } from "../stores/theme";
+import { useTreeStore } from "../stores/tree";
+import { showDialog } from "../stores/dialog";
+import { invoke } from "@tauri-apps/api/core";
+
 export default function TopBar() {
 	const mode = useThemeStore((s) => s.mode);
 	const toggle = useThemeStore((s) => s.toggle);
+	const rootPath = useTreeStore((s) => s.rootPath);
+	const rootName = useTreeStore((s) => s.rootName);
+	const openRoot = useTreeStore((s) => s.openRoot);
+	const refreshRoot = useTreeStore((s) => s.refreshRoot);
 
-	// 快捷键 Ctrl+Shift+T 切换主题
+	// 快捷键 Ctrl+Shift+T 主题 / Ctrl+O 打开目录
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
-			if (e.ctrlKey && e.shiftKey && (e.key === "T" || e.key === "t")) {
+			if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "t") {
 				e.preventDefault();
 				toggle();
+			} else if (
+				e.ctrlKey &&
+				!e.shiftKey &&
+				!e.altKey &&
+				e.key.toLowerCase() === "o"
+			) {
+				e.preventDefault();
+				void pickFolder();
 			}
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	}, [toggle]);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
+
+	const pickFolder = async () => {
+		const dir = await openDialog({
+			directory: true,
+			title: "选择要打开的文件夹",
+		});
+		if (typeof dir === "string") {
+			try {
+				await openRoot(dir);
+			} catch (e) {
+				await showDialog({
+					title: "打开目录失败",
+					message: String(e),
+					buttons: [{ id: "ok", label: "确定", danger: false }],
+				});
+			}
+		}
+	};
+
+	const newFile = async () => {
+		if (!rootPath) return;
+		const r = await showDialog({
+			title: "新建文件",
+			inputLabel: "文件名",
+			buttons: [
+				{ id: "ok", label: "创建", danger: false },
+				{ id: "cancel", label: "取消", danger: false },
+			],
+		});
+		if (r.button !== "ok" || !r.input.trim()) return;
+		try {
+			await invoke("create_file", {
+				path: rootPath + "\\" + r.input.trim(),
+				isDir: false,
+			});
+		} catch (e) {
+			await showDialog({
+				title: "创建失败",
+				message: String(e),
+				buttons: [{ id: "ok", label: "确定", danger: false }],
+			});
+		}
+		await refreshRoot();
+	};
 
 	return (
 		<header className="topbar">
-			<span className="topbar-title">简阅</span>
+			<span className="topbar-title" title={rootPath ?? "简阅"}>
+				📝 {rootName || "简阅"}
+			</span>
+			{rootPath && (
+				<button
+					className="icon-btn"
+					onClick={() => void newFile()}
+					title="新建文件"
+				>
+					＋
+				</button>
+			)}
+			<button
+				className="icon-btn"
+				onClick={() => void refreshRoot()}
+				title="刷新目录"
+				disabled={!rootPath}
+			>
+				🔄
+			</button>
+			<button
+				className="icon-btn"
+				onClick={pickFolder}
+				title="打开文件夹 (Ctrl+O)"
+			>
+				📂
+			</button>
 			<button
 				className="icon-btn"
 				onClick={toggle}

@@ -14,8 +14,12 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+chardetng = "0.1"
+encoding_rs = "0.8"
 
 [features]
 # 自定义协议（M2+ 用于本地图片 asset 映射、可能的大文件 stream 读取）

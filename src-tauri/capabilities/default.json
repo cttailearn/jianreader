@@ -1,7 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "默认能力：核心 API。fs/dialog/opener 权限在 M2/M3 按需加",
+  "description": "默认能力：核心 API + 目录选择对话框 + 资源管理器定位",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "opener:default",
+    "opener:allow-reveal-item-in-dir"
+  ]
 }
