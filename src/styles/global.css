@@ -438,6 +438,41 @@ body {
 	font-size: 14px;
 }
 
+/* ============ 外部修改提示条 ============ */
+.external-change-bar {
+	flex-shrink: 0;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 7px 12px;
+	background: var(--warning-bg);
+	border-bottom: 1px solid var(--warning-border);
+	font-size: 13px;
+	color: var(--text);
+}
+
+.ecb-icon {
+	font-size: 14px;
+}
+
+.ecb-text {
+	flex: 1;
+}
+
+.ecb-btn {
+	padding: 3px 12px;
+	border: 1px solid var(--warning-border);
+	border-radius: 4px;
+	background: var(--surface);
+	color: var(--text);
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.ecb-btn:hover {
+	background: var(--hover);
+}
+
 /* ============ 对话框 ============ */
 .dialog-overlay {
 	position: fixed;

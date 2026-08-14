@@ -4,8 +4,10 @@ import StatusBar from "./components/StatusBar";
 import FileTree from "./components/FileTree";
 import TabBar from "./components/TabBar";
 import DialogModal from "./components/DialogModal";
+import ExternalChangeBar from "./components/ExternalChangeBar";
 import { useThemeStore } from "./stores/theme";
 import { saveActive, useTabsStore } from "./stores/tabs";
+import { initWatcher } from "./stores/watcher";
 
 // 编辑器内核懒加载：首屏不打包 CM6，点开文件才加载（design 7.1）
 const EditorHost = lazy(() => import("./editors"));
@@ -40,6 +42,17 @@ export default function App() {
 		return () => window.removeEventListener("keydown", onKey);
 	}, []);
 
+	// fs-event 全局监听（Rust notify → 目录树/标签同步）
+	useEffect(() => {
+		let unlisten: (() => void) | undefined;
+		initWatcher()
+			.then((u) => {
+				unlisten = u;
+			})
+			.catch((e) => console.warn("watcher listen failed:", e));
+		return () => unlisten?.();
+	}, []);
+
 	return (
 		<div className="app">
 			<TopBar />
@@ -50,12 +63,25 @@ export default function App() {
 				<section className="panel-center">
 					<TabBar />
 					<div className="editor-area">
+						{activeDoc && activeDoc.status === "external-changed" && (
+							<ExternalChangeBar path={activeDoc.path} />
+						)}
 						{activeDoc ? (
 							activeDoc.status === "error" ? (
 								<div className="editor-placeholder">
 									<div className="logo">⚠️</div>
 									<div className="title">打开失败</div>
 									<div className="hint">{activeDoc.lastError}</div>
+								</div>
+							) : activeDoc.status === "deleted" ? (
+								<div className="editor-placeholder">
+									<div className="logo">🗑️</div>
+									<div className="title">文件已被删除</div>
+									<div className="hint">
+										该文件在磁盘上已不存在。
+										<br />
+										<kbd>Ctrl+S</kbd> 可在原位置重建文件
+									</div>
 								</div>
 							) : (
 								<Suspense
@@ -64,7 +90,7 @@ export default function App() {
 									}
 								>
 									<EditorHost
-										key={activeDoc.path}
+										key={`${activeDoc.path}:${activeDoc.rev}`}
 										path={activeDoc.path}
 										content={activeDoc.content}
 										theme={mode}

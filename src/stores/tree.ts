@@ -1,8 +1,9 @@
 //! 目录树状态：按目录懒加载 entries
-//! M3 接入 notify 后改为增量 patch；当前 refreshDir 为整层重载
+//! M3：notify 事件 → applyFsEvent 增量刷新（仅重载已加载的父目录层）
 
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+import type { FsEvent } from "./watcher";
 
 export interface TreeNode {
 	name: string;
@@ -32,6 +33,8 @@ interface TreeState {
 	/** 重载某一层（新建/删除/重命名后调用） */
 	refreshDir: (path: string) => Promise<void>;
 	refreshRoot: () => Promise<void>;
+	/** M3：notify 事件增量更新（父目录已加载才刷新） */
+	applyFsEvent: (ev: FsEvent) => void;
 }
 
 function toNode(e: DirEntry): TreeNode {
@@ -50,6 +53,12 @@ export const useTreeStore = create<TreeState>((set, get) => ({
 	expanded: new Set(),
 
 	openRoot: async (path) => {
+		// 停旧监听（无旧监听时静默）
+		try {
+			await invoke("stop_watch");
+		} catch {
+			/* ignore */
+		}
 		const entries = await invoke<DirEntry[]>("read_dir_entries", { path });
 		const root: TreeNode = {
 			name: path.split(/[\\/]/).pop() || path,
@@ -60,10 +69,18 @@ export const useTreeStore = create<TreeState>((set, get) => ({
 			loaded: true,
 		};
 		set({ rootPath: path, rootName: root.name, root, expanded: new Set() });
+		// 启动监听（失败不阻断浏览）
+		try {
+			await invoke("start_watch", { path });
+		} catch (e) {
+			console.warn("start_watch failed:", e);
+		}
 	},
 
-	closeRoot: () =>
-		set({ rootPath: null, rootName: "", root: null, expanded: new Set() }),
+	closeRoot: () => {
+		void invoke("stop_watch").catch(() => {});
+		set({ rootPath: null, rootName: "", root: null, expanded: new Set() });
+	},
 
 	toggleExpand: async (path) => {
 		const node = findNode(get().root, path);
@@ -127,6 +144,24 @@ export const useTreeStore = create<TreeState>((set, get) => ({
 	refreshRoot: async () => {
 		const p = get().rootPath;
 		if (p) await get().refreshDir(p);
+	},
+
+	applyFsEvent: (ev) => {
+		const { root, refreshDir } = get();
+		if (!root) return;
+		const dirname = (p: string) => p.replace(/[\\/][^\\/]*$/, "");
+		// 仅当该目录层已加载（用户在树里展开过）才刷新
+		const refreshIfLoaded = (dir: string) => {
+			const node = findNode(root, dir);
+			if (node && node.loaded) void refreshDir(dir);
+		};
+		if (ev.kind === "rename") {
+			if (ev.from_path) refreshIfLoaded(dirname(ev.from_path));
+			refreshIfLoaded(dirname(ev.path));
+		} else if (ev.kind === "create" || ev.kind === "remove") {
+			refreshIfLoaded(dirname(ev.path));
+		}
+		// modify 不需要动目录树（内容变更由标签页处理）
 	},
 }));
 

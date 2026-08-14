@@ -152,18 +152,23 @@ pub fn read_text_file(path: String) -> Result<FilePayload, String> {
     })
 }
 
-/// 写文本文件：原编码 + 原 EOL 回写
+/// 写文本文件：原编码 + 原 EOL 回写；成功后登记回环抑制白名单，返回新文件大小
 #[tauri::command]
 pub fn write_text_file(
+    app: tauri::AppHandle,
     path: String,
     content: String,
     encoding: String,
     has_bom: bool,
     eol: String,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let normalized = normalize_eol(&content, &eol);
     let bytes = encode_text(&normalized, &encoding, has_bom)?;
-    fs::write(&path, &bytes).map_err(|e| io_err(e, "写入文件"))
+    fs::write(&path, &bytes).map_err(|e| io_err(e, "写入文件"))?;
+    crate::watcher::register_saved(&app, &path);
+    fs::metadata(&path)
+        .map(|m| m.len())
+        .map_err(|e| io_err(e, "获取文件信息"))
 }
 
 /// 列举一层目录（懒加载），目录在前按名排序，过滤噪音目录

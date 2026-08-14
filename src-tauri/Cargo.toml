@@ -20,6 +20,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chardetng = "0.1"
 encoding_rs = "0.8"
+notify = "8"
 
 [features]
 # 自定义协议（M2+ 用于本地图片 asset 映射、可能的大文件 stream 读取）
