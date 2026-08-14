@@ -29,6 +29,8 @@ export interface TabDoc {
 	status: DocStatus;
 	/** 内容代际：外部重载后 +1，编辑器 key 随之重建 */
 	rev: number;
+	/** MD 视图模式：所见即所得 / 源码 */
+	mdView: "wysiwyg" | "source";
 	lastError?: string;
 }
 
@@ -72,6 +74,8 @@ interface TabsState {
 	close: (path: string) => Promise<boolean>;
 	/** 编辑器内容变更（自动标记 dirty；external-changed 保持提示态） */
 	updateContent: (path: string, content: string) => void;
+	/** 静默同步内容（不标 dirty）：编辑器解析规范化（如 GFM 任务列表 - → *）后同步 */
+	syncContent: (path: string, content: string) => void;
 	save: (path: string) => Promise<boolean>;
 	saveAll: () => Promise<void>;
 	/** 外部修改且本地未改：重新读盘（rev+1） */
@@ -84,6 +88,8 @@ interface TabsState {
 	markDeleted: (path: string) => void;
 	/** 文件/目录改名：更新标签路径 */
 	renameTab: (fromPath: string, toPath: string) => void;
+	/** MD 视图模式切换（wysiwyg ↔ source） */
+	toggleMdView: (path: string) => void;
 }
 
 export const useTabsStore = create<TabsState>((set, get) => ({
@@ -100,6 +106,7 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 		const doc: TabDoc = {
 			path,
 			name: basename(path),
+			mdView: "wysiwyg",
 			content: "",
 			encoding: "UTF-8",
 			hasBom: false,
@@ -167,6 +174,15 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 			),
 		})),
 
+	syncContent: (path, content) =>
+		set((s) => ({
+			tabs: s.tabs.map((t) =>
+				t.path === path && t.content !== content && t.status === "ready"
+					? { ...t, content }
+					: t,
+			),
+		})),
+
 	save: async (path) => {
 		const doc = get().tabs.find((t) => t.path === path);
 		if (!doc || doc.status === "saving") return false;
@@ -186,7 +202,12 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 			set((s) => ({
 				tabs: s.tabs.map((t) =>
 					t.path === path
-						? { ...t, status: "ready" as DocStatus, lastError: undefined, size: newSize }
+						? {
+								...t,
+								status: "ready" as DocStatus,
+								lastError: undefined,
+								size: newSize,
+							}
 						: t,
 				),
 			}));
@@ -269,6 +290,21 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 					: t,
 			),
 			activePath: s.activePath === fromPath ? toPath : s.activePath,
+		})),
+
+	toggleMdView: (path) =>
+		set((s) => ({
+			tabs: s.tabs.map((t) =>
+				t.path === path
+					? {
+							...t,
+							mdView:
+								t.mdView === "wysiwyg"
+									? ("source" as const)
+									: ("wysiwyg" as const),
+						}
+					: t,
+			),
 		})),
 }));
 

@@ -4,12 +4,15 @@ import { useThemeStore } from "../stores/theme";
 import { useTabsStore } from "../stores/tabs";
 import { useCursorStore } from "../stores/ui";
 import { formatSize } from "./FileTree";
+import { isMarkdownPath } from "../utils/mdImage";
 
 export default function StatusBar() {
 	const mode = useThemeStore((s) => s.mode);
 	const toggle = useThemeStore((s) => s.toggle);
 	const doc = useTabsStore((s) => s.tabs.find((t) => t.path === s.activePath));
-	const cursor = useCursorStore((s) => ({ line: s.line, col: s.col }));
+	const toggleMdView = useTabsStore((s) => s.toggleMdView);
+	// 注意：selector 必须返回稳定引用/原始值（zustand v5 快照比较），不能返回新对象
+	const cursorPos = useCursorStore((s) => `${s.line}:${s.col}`);
 
 	return (
 		<footer className="statusbar">
@@ -27,7 +30,7 @@ export default function StatusBar() {
 					</span>
 					<span className="statusbar-item">{doc.languageName}</span>
 					<span className="statusbar-item">
-						行 {cursor.line}, 列 {cursor.col}
+						行 {cursorPos.split(":")[0]}, 列 {cursorPos.split(":")[1]}
 					</span>
 					{doc.status === "dirty" && (
 						<span
@@ -42,6 +45,15 @@ export default function StatusBar() {
 					)}
 					{doc.status === "loading" && (
 						<span className="statusbar-item">⏳ 加载中…</span>
+					)}
+					{isMarkdownPath(doc.path) && (
+						<span
+							className="statusbar-item clickable"
+							onClick={() => toggleMdView(doc.path)}
+							title="切换所见即所得/源码模式"
+						>
+							{doc.mdView === "wysiwyg" ? "📖 所见即所得" : "⌨️ 源码"}
+						</span>
 					)}
 					<span className="statusbar-item">{formatSize(doc.size)}</span>
 				</>

@@ -18,11 +18,16 @@
         "height": 800,
         "minWidth": 900,
         "minHeight": 600,
-        "center": true
+        "center": true,
+        "additionalBrowserArgs": "--remote-debugging-port=9222"
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
     }
   },
   "bundle": {

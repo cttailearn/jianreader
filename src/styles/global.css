@@ -473,6 +473,147 @@ body {
 	background: var(--hover);
 }
 
+/* ============ 右侧栏（MD 大纲） ============ */
+.panel-right {
+	width: 220px;
+	min-width: 150px;
+	max-width: 360px;
+	flex-shrink: 0;
+	border-left: 1px solid var(--border);
+	background: var(--bg-secondary);
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+.toc-panel {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	min-height: 0;
+}
+
+.toc-header {
+	padding: 8px 12px;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	border-bottom: 1px solid var(--border);
+}
+
+.toc-body {
+	flex: 1;
+	overflow-y: auto;
+	min-height: 0;
+	padding: 4px 0;
+}
+
+.toc-empty {
+	padding: 16px 12px;
+	font-size: 12px;
+	color: var(--text-muted);
+	text-align: center;
+}
+
+.toc-footer {
+	padding: 6px 12px;
+	font-size: 11px;
+	color: var(--text-muted);
+	border-top: 1px solid var(--border);
+}
+
+.toc-row {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 4px 8px;
+	cursor: pointer;
+	font-size: 12.5px;
+	color: var(--text);
+	white-space: nowrap;
+}
+
+.toc-row:hover {
+	background: var(--hover);
+}
+
+.toc-row.active {
+	background: var(--active);
+	color: var(--accent);
+}
+
+.toc-row.top {
+	font-weight: 600;
+}
+
+.toc-caret {
+	flex-shrink: 0;
+	width: 14px;
+	text-align: center;
+	font-size: 10px;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.toc-caret.placeholder {
+	cursor: default;
+}
+
+.toc-text {
+	flex-shrink: 0;
+	font-size: 10px;
+	color: var(--text-muted);
+}
+
+.toc-name {
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* ============ Markdown 所见即所得容器 ============ */
+.markdown-host {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	background: var(--crepe-color-background, var(--bg));
+}
+
+.markdown-host .milkdown {
+	max-width: 860px;
+	margin: 0 auto;
+	min-height: 100%;
+	padding: 24px 32px 40vh;
+	box-sizing: border-box;
+}
+
+.markdown-host .milkdown .editor {
+	outline: none;
+}
+
+/* Crepe 暗色主题：把 nord-dark 变量注入 tokens 体系 */
+[data-theme="dark"] .markdown-host .milkdown {
+	--crepe-color-background: #1b1c1d;
+	--crepe-color-on-background: #f8f9ff;
+	--crepe-color-surface: #111418;
+	--crepe-color-surface-low: #191c20;
+	--crepe-color-on-surface: #e1e2e8;
+	--crepe-color-on-surface-variant: #c3c6cf;
+	--crepe-color-outline: #8d9199;
+	--crepe-color-primary: #a1c9fd;
+	--crepe-color-secondary: #3c4858;
+	--crepe-color-on-secondary: #d7e3f8;
+	--crepe-color-inverse: #e1e2e8;
+	--crepe-color-on-inverse: #2e3135;
+	--crepe-color-inline-code: #ffb4ab;
+	--crepe-color-error: #ffb4ab;
+	--crepe-color-hover: #1d2024;
+	--crepe-color-selected: #32353a;
+	--crepe-color-inline-area: #111418;
+}
+
 /* ============ 对话框 ============ */
 .dialog-overlay {
 	position: fixed;

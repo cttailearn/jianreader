@@ -5,9 +5,11 @@ import FileTree from "./components/FileTree";
 import TabBar from "./components/TabBar";
 import DialogModal from "./components/DialogModal";
 import ExternalChangeBar from "./components/ExternalChangeBar";
+import TocPanel from "./components/TocPanel";
 import { useThemeStore } from "./stores/theme";
 import { saveActive, useTabsStore } from "./stores/tabs";
 import { initWatcher } from "./stores/watcher";
+import { isMarkdownPath } from "./utils/mdImage";
 
 // 编辑器内核懒加载：首屏不打包 CM6，点开文件才加载（design 7.1）
 const EditorHost = lazy(() => import("./editors"));
@@ -21,6 +23,7 @@ export default function App() {
 	const tabs = useTabsStore((s) => s.tabs);
 	const activePath = useTabsStore((s) => s.activePath);
 	const updateContent = useTabsStore((s) => s.updateContent);
+	const syncContent = useTabsStore((s) => s.syncContent);
 	const activeDoc = tabs.find((t) => t.path === activePath) ?? null;
 
 	// 全局快捷键：Ctrl+S 保存 / Ctrl+W 关闭当前标签（编辑器聚焦时也生效）
@@ -90,13 +93,15 @@ export default function App() {
 									}
 								>
 									<EditorHost
-										key={`${activeDoc.path}:${activeDoc.rev}`}
+										key={`${activeDoc.path}:${activeDoc.rev}:${activeDoc.mdView}`}
 										path={activeDoc.path}
 										content={activeDoc.content}
 										theme={mode}
 										status={activeDoc.status}
+										mdView={activeDoc.mdView}
 										lastError={activeDoc.lastError}
 										onChange={(c) => updateContent(activeDoc.path, c)}
+										onSync={(c) => syncContent(activeDoc.path, c)}
 									/>
 								</Suspense>
 							)
@@ -114,6 +119,11 @@ export default function App() {
 						)}
 					</div>
 				</section>
+				{activeDoc && isMarkdownPath(activeDoc.path) && (
+					<aside className="panel-right">
+						<TocPanel />
+					</aside>
+				)}
 			</div>
 			<StatusBar />
 			<DialogModal />
