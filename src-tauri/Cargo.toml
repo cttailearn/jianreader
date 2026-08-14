@@ -1,0 +1,31 @@
+[package]
+name = "text-viewer-editor"
+version = "0.1.0"
+description = "简阅 —— 轻量文本查看编辑器"
+edition = "2021"
+
+# Tauri 2 标准库形态（staticlib/cdylib 兼容移动端，桌面用 rlib）
+[lib]
+name = "text_viewer_editor_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+# 自定义协议（M2+ 用于本地图片 asset 映射、可能的大文件 stream 读取）
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.dev]
+# dev 模式编译快一点
+opt-level = 1
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

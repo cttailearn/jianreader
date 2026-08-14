@@ -1,0 +1,15 @@
+# 前端
+node_modules
+dist
+*.local
+
+# Rust
+src-tauri/target
+src-tauri/gen/schemas
+
+# 编辑器
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.log

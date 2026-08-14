@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>简阅</title>
+    <script>
+      // 防主题闪烁：JS 加载前先套用持久化的主题（与 theme store 共用 key）
+      try {
+        var t = localStorage.getItem("tve-theme");
+        if (t === "dark") document.documentElement.dataset.theme = "dark";
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

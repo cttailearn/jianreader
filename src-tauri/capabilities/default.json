@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "默认能力：核心 API。fs/dialog/opener 权限在 M2/M3 按需加",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

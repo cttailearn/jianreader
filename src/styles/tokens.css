@@ -1,0 +1,40 @@
+/* ============================================================
+ * 语义色 token —— 浅色 / 暗色双主题
+ * 组件一律引用语义变量，不写死颜色
+ * ============================================================ */
+
+:root[data-theme="light"] {
+	color-scheme: light;
+	--bg: #ffffff;
+	--bg-secondary: #f3f3f3;
+	--surface: #ffffff;
+	--border: #e0e0e0;
+	--text: #1f1f1f;
+	--text-muted: #6b6b6b;
+	--accent: #2f6fed;
+	--accent-contrast: #ffffff;
+	--hover: rgba(0, 0, 0, 0.05);
+	--active: rgba(47, 111, 237, 0.12);
+	--code-bg: #f6f6f6;
+	--danger: #d64545;
+	--warning-bg: #fff7e6;
+	--warning-border: #e8c98a;
+}
+
+:root[data-theme="dark"] {
+	color-scheme: dark;
+	--bg: #1e1e1e;
+	--bg-secondary: #252526;
+	--surface: #1e1e1e;
+	--border: #3c3c3c;
+	--text: #d4d4d4;
+	--text-muted: #8a8a8a;
+	--accent: #4d8bff;
+	--accent-contrast: #ffffff;
+	--hover: rgba(255, 255, 255, 0.06);
+	--active: rgba(77, 139, 255, 0.18);
+	--code-bg: #2d2d2d;
+	--danger: #e06c6c;
+	--warning-bg: #3a3220;
+	--warning-border: #6b5a33;
+}
