@@ -414,9 +414,12 @@ pub fn scan_chapters(
     let readonly = fs::metadata(&path)
         .map(|m| m.permissions().readonly())
         .unwrap_or(false);
+    // 编码检测必须喂全量字节（与普通模式 read_text_file 一致）：
+    // 若只喂头部 64KB，纯 ASCII 文件头（书名/英文说明/空行）会让 from_utf8 校验通过
+    // → 误判 UTF-8 → 后面的 GBK 正文乱码 + 章节识别失败（M8 修复）
     let (encoding, has_bom) = match encoding_override {
         Some(enc) => (enc, false),
-        None => detect_encoding(&bytes[..bytes.len().min(65536)]),
+        None => detect_encoding(&bytes),
     };
 
     // 自定义正则（用户提供，逐行匹配；只对短行执行控制开销）
@@ -802,6 +805,33 @@ mod tests {
         assert!(!gbk_plausible(&ascii));
         let (enc2, _) = detect_encoding(&ascii);
         assert_eq!(enc2, "UTF-8");
+    }
+
+    /// 回归测试（M8）：文件头为大量 ASCII（>64KB），正文为 GBK 中文。
+    /// 此前 scan 只检测头部 64KB → 误判 UTF-8 → 乱码；现全量检测必须判 GBK。
+    #[test]
+    fn ascii_head_gbk_body() {
+        let head = "The Complete Novel Series\nAuthor: Unknown\n\
+This is a sample book with ascii header exceeding sixty four kilobytes of pure text.\n"
+            .repeat(1200);
+        assert!(head.len() > 65536, "头部需超过 64KB: {}", head.len());
+        let (gbk, _, _) = encoding_rs::GBK.encode(
+            "第一章 测试\n这是正文内容，验证头部ASCII时正文GBK不乱码。\n第二章 继续\n",
+        );
+        let mut bytes = head.into_bytes();
+        bytes.extend_from_slice(&gbk);
+        let (enc, _) = detect_encoding(&bytes);
+        assert_eq!(enc, "GBK", "ASCII 头 + GBK 正文必须检测为 GBK");
+
+        // 全链路：scan 出的章节标题应为中文（不是乱码替换符）
+        let dir = std::env::temp_dir();
+        let p = dir.join("jianyue-ascii-head-gbk-test.txt");
+        std::fs::write(&p, &bytes).unwrap();
+        let r = scan_chapters(p.to_string_lossy().into_owned(), None, None).unwrap();
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(r.encoding, "GBK");
+        assert_eq!(r.chapters[0].title, "第一章 测试");
+        assert!(r.chapters.len() >= 2);
     }
 
     #[test]
