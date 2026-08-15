@@ -288,16 +288,23 @@ pub fn file_meta(path: String) -> Result<(u64, bool), String> {
 }
 
 /// 列举一层目录（懒加载），目录在前按名排序，过滤噪音目录
+/// show_hidden=true 时显示 .git/node_modules 等隐藏项（设置开关，M9）
 #[tauri::command]
-pub fn read_dir_entries(path: String) -> Result<Vec<DirEntryInfo>, String> {
+pub fn read_dir_entries(path: String, show_hidden: Option<bool>) -> Result<Vec<DirEntryInfo>, String> {
+    let show_hidden = show_hidden.unwrap_or(false);
     let rd = fs::read_dir(&path).map_err(|e| io_err(e, "读取目录"))?;
     let mut dirs: Vec<DirEntryInfo> = Vec::new();
     let mut files: Vec<DirEntryInfo> = Vec::new();
     for entry in rd.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        if is_dir && NOISE_DIRS.contains(&name.as_str()) {
-            continue;
+        if !show_hidden {
+            if is_dir && NOISE_DIRS.contains(&name.as_str()) {
+                continue;
+            }
+            if name.starts_with('.') {
+                continue; // 隐藏文件/目录（. 开头）
+            }
         }
         let size = if is_dir {
             0

@@ -7,6 +7,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { getLanguage, isImagePath } from "../utils/language";
+import { useSettingsStore } from "./settings";
 
 export type DocStatus =
 	| "loading"
@@ -211,6 +212,7 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 	close: async (path) => {
 		const doc = get().tabs.find((t) => t.path === path);
 		if (!doc) return true;
+		cancelAutosave(path);
 		if (doc.status === "dirty" || doc.status === "external-changed") {
 			const { showDialog } = await import("./dialog");
 			const r = await showDialog({
@@ -228,11 +230,10 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 				if (!ok) return false;
 			}
 		}
-		// 小说标签：关闭前记录续读位置
+		// 小说标签：关闭前记录续读位置并卸载 book（防 books map 泄漏，M9 审查）
 		if (doc.isNovel) {
 			const { useNovelStore } = await import("./novel");
-			const b = useNovelStore.getState().books.get(path);
-			if (b) useNovelStore.getState().markReading(path, b.chapterIdx);
+			useNovelStore.getState().unloadBook(path);
 		}
 		set((s) => {
 			const tabs = s.tabs.filter((t) => t.path !== path);
@@ -248,11 +249,16 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 
 	updateContent: (path, content) =>
 		set((s) => ({
-			tabs: s.tabs.map((t) =>
-				t.path === path && t.status !== "saving" && t.content !== content
-					? { ...t, content, status: "dirty" as DocStatus }
-					: t,
-			),
+			tabs: s.tabs.map((t) => {
+				if (t.path !== path || t.status === "saving" || t.content === content)
+					return t;
+				const next = { ...t, content, status: "dirty" as DocStatus };
+				// 自动保存（设置开启时 dirty 后 2s 自动写盘，M9）
+				if (useSettingsStore.getState().settings.autoSave && !next.readonly) {
+					scheduleAutosave(get, path);
+				}
+				return next;
+			}),
 		})),
 
 	syncContent: (path, content) =>
@@ -267,6 +273,7 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 	save: async (path) => {
 		const doc = get().tabs.find((t) => t.path === path);
 		if (!doc || doc.status === "saving") return false;
+		cancelAutosave(path);
 		// 只读文件拦截（磁盘只读 / 大文件保护）
 		if (doc.readonly) {
 			const { showDialog } = await import("./dialog");
@@ -524,4 +531,29 @@ export async function saveActive(): Promise<boolean> {
 	const { activePath, save } = useTabsStore.getState();
 	if (!activePath) return true;
 	return save(activePath);
+}
+
+// ---- 自动保存（M9）：dirty 后 2s 防抖写盘 ----
+
+const autosaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function scheduleAutosave(get: () => TabsState, path: string) {
+	const prev = autosaveTimers.get(path);
+	if (prev) clearTimeout(prev);
+	autosaveTimers.set(
+		path,
+		setTimeout(() => {
+			autosaveTimers.delete(path);
+			void get().save(path).catch(() => {});
+		}, 2000),
+	);
+}
+
+/** 取消某标签的自动保存计时（保存/关闭标签时调用） */
+export function cancelAutosave(path: string): void {
+	const t = autosaveTimers.get(path);
+	if (t) {
+		clearTimeout(t);
+		autosaveTimers.delete(path);
+	}
 }

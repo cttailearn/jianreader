@@ -14,6 +14,7 @@ import {
 } from "../stores/novel";
 import { saveActiveNovel } from "../stores/saveNovel";
 import { useTabsStore } from "../stores/tabs";
+import { matchKey, useKeymapStore } from "../stores/keymap";
 
 interface Props {
 	path: string;
@@ -114,10 +115,11 @@ export default function NovelReader({ path }: Props) {
 		await saveActiveNovel(path);
 	};
 
-	// Ctrl+F 打开查找栏
+	// 查找栏快捷键（可自定义，M9）
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
-			if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "f") {
+			const km = useKeymapStore.getState().keymap;
+			if (matchKey(e, km.findInReader)) {
 				e.preventDefault();
 				setFindOpen(true);
 			}

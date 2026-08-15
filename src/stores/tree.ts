@@ -4,6 +4,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import type { FsEvent } from "./watcher";
+import { useSettingsStore } from "./settings";
 
 export interface TreeNode {
 	name: string;
@@ -53,7 +54,10 @@ export const useTreeStore = create<TreeState>((set, get) => ({
 	expanded: new Set(),
 
 	openRoot: async (path) => {
-		const entries = await invoke<DirEntry[]>("read_dir_entries", { path });
+		const entries = await invoke<DirEntry[]>("read_dir_entries", {
+			path,
+			showHidden: useSettingsStore.getState().settings.showHidden,
+		});
 		const root: TreeNode = {
 			name: path.split(/[\\/]/).pop() || path,
 			path,
@@ -95,7 +99,10 @@ export const useTreeStore = create<TreeState>((set, get) => ({
 			root: patchNode(s.root, path, { loading: true }),
 		}));
 		try {
-			const entries = await invoke<DirEntry[]>("read_dir_entries", { path });
+			const entries = await invoke<DirEntry[]>("read_dir_entries", {
+				path,
+				showHidden: useSettingsStore.getState().settings.showHidden,
+			});
 			set((s) => {
 				const next = new Set(s.expanded);
 				next.add(path);
@@ -116,7 +123,10 @@ export const useTreeStore = create<TreeState>((set, get) => ({
 	refreshDir: async (path) => {
 		const isExpanded = get().expanded.has(path);
 		try {
-			const entries = await invoke<DirEntry[]>("read_dir_entries", { path });
+			const entries = await invoke<DirEntry[]>("read_dir_entries", {
+				path,
+				showHidden: useSettingsStore.getState().settings.showHidden,
+			});
 			set((s) => ({
 				root: patchNode(s.root, path, {
 					children: entries.map(toNode),

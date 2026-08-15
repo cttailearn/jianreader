@@ -24,6 +24,9 @@ import { useTreeStore } from "./stores/tree";
 import { usePanelsStore } from "./stores/panels";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { invoke } from "@tauri-apps/api/core";
+import { matchKey, useKeymapStore } from "./stores/keymap";
+import { useSettingsStore } from "./stores/settings";
+import SettingsPanel from "./components/SettingsPanel";
 
 // 编辑器内核懒加载：首屏不打包 CM6，点开文件才加载（design 7.1）
 const EditorHost = lazy(() => import("./editors"));
@@ -172,24 +175,29 @@ export default function App() {
 		return () => clearInterval(id);
 	}, []);
 
-	// 全局快捷键：Ctrl+S 保存 / Ctrl+W 关闭当前标签（编辑器聚焦时也生效）
+	// 全局快捷键（可自定义，M9）：保存 / 关闭标签 / 下一个标签（设置面板打开时屏蔽）
+	const keymap = useKeymapStore((s) => s.keymap);
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
-			if (e.ctrlKey && !e.shiftKey && !e.altKey) {
-				const k = e.key.toLowerCase();
-				if (k === "s") {
-					e.preventDefault();
-					void saveActive();
-				} else if (k === "w") {
-					e.preventDefault();
-					const s = useTabsStore.getState();
-					if (s.activePath) void s.close(s.activePath);
-				}
+			if (useSettingsStore.getState().panelOpen) return;
+			if (matchKey(e, keymap.save)) {
+				e.preventDefault();
+				void saveActive();
+			} else if (matchKey(e, keymap.closeTab)) {
+				e.preventDefault();
+				const s = useTabsStore.getState();
+				if (s.activePath) void s.close(s.activePath);
+			} else if (matchKey(e, keymap.nextTab)) {
+				e.preventDefault();
+				const s = useTabsStore.getState();
+				if (s.tabs.length < 2) return;
+				const idx = s.tabs.findIndex((t) => t.path === s.activePath);
+				s.activate(s.tabs[(idx + 1) % s.tabs.length].path);
 			}
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	}, []);
+	}, [keymap]);
 
 	// fs-event 全局监听（Rust notify → 目录树/标签同步）
 	useEffect(() => {
@@ -293,6 +301,7 @@ export default function App() {
 			</div>
 			<StatusBar />
 			<DialogModal />
+			<SettingsPanel />
 			{dragOver && (
 				<div className="drop-overlay">
 					<div className="drop-overlay-inner">松开以打开</div>

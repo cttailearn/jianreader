@@ -8,6 +8,8 @@ import { useThemeStore } from "../stores/theme";
 import { useTreeStore } from "../stores/tree";
 import { showDialog } from "../stores/dialog";
 import { invoke } from "@tauri-apps/api/core";
+import { useKeymapStore, matchKey } from "../stores/keymap";
+import { useSettingsStore } from "../stores/settings";
 
 export default function TopBar() {
 	const mode = useThemeStore((s) => s.mode);
@@ -16,19 +18,17 @@ export default function TopBar() {
 	const rootName = useTreeStore((s) => s.rootName);
 	const openRoot = useTreeStore((s) => s.openRoot);
 	const refreshRoot = useTreeStore((s) => s.refreshRoot);
+	const keymap = useKeymapStore((s) => s.keymap);
+	const setPanelOpen = useSettingsStore((s) => s.setPanelOpen);
 
-	// 快捷键 Ctrl+Shift+T 主题 / Ctrl+O 打开目录
+	// 快捷键（可自定义）：主题切换 / 打开目录（设置面板打开时屏蔽）
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
-			if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "t") {
+			if (useSettingsStore.getState().panelOpen) return;
+			if (matchKey(e, keymap.toggleTheme)) {
 				e.preventDefault();
 				toggle();
-			} else if (
-				e.ctrlKey &&
-				!e.shiftKey &&
-				!e.altKey &&
-				e.key.toLowerCase() === "o"
-			) {
+			} else if (matchKey(e, keymap.openFolder)) {
 				e.preventDefault();
 				void pickFolder();
 			}
@@ -36,7 +36,7 @@ export default function TopBar() {
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, []);
+	}, [keymap, toggle]);
 
 	const pickFolder = async () => {
 		const dir = await openDialog({
@@ -185,6 +185,13 @@ export default function TopBar() {
 					title={`切换主题（当前${mode === "light" ? "浅色" : "暗色"}）Ctrl+Shift+T`}
 				>
 					{mode === "light" ? "🌙" : "☀️"}
+				</button>
+				<button
+					className="icon-btn"
+					onClick={() => setPanelOpen(true)}
+					title="设置（快捷键/自动保存/隐藏文件）"
+				>
+					⚙️
 				</button>
 			</div>
 		</header>

@@ -18,9 +18,10 @@ const FLUSH_INTERVAL: Duration = Duration::from_millis(300);
 const IGNORE_TTL: Duration = Duration::from_secs(5);
 
 /// 保存回环抑制白名单 + 监听根目录列表（M7：多窗口各自监听，互不覆盖）
+/// roots: (窗口 label, 根目录) —— 窗口销毁后对应监听自动退出（M9 审查修复）
 pub struct WatchState {
     pub ignore: Mutex<HashMap<String, (u128, Instant)>>,
-    pub roots: Mutex<Vec<String>>,
+    pub roots: Mutex<Vec<(String, String)>>,
 }
 
 impl Default for WatchState {
@@ -59,6 +60,7 @@ pub fn register_saved(app: &AppHandle, path: &str) {
 
 #[tauri::command]
 pub fn start_watch(
+    window: tauri::WebviewWindow,
     app: AppHandle,
     path: String,
     state: State<'_, WatchState>,
@@ -67,8 +69,9 @@ pub fn start_watch(
     if !root.is_dir() {
         return Err("不是有效的目录".into());
     }
+    let label = window.label().to_owned();
     // 已监听同路径：直接成功（幂等）
-    if state.roots.lock().unwrap().iter().any(|r| r == &path) {
+    if state.roots.lock().unwrap().iter().any(|(_, r)| r == &path) {
         return Ok(());
     }
     let (tx, rx) = mpsc::channel::<Result<Event, notify::Error>>();
@@ -80,7 +83,7 @@ pub fn start_watch(
     watcher
         .watch(&root, RecursiveMode::Recursive)
         .map_err(|e| format!("监听目录失败: {e}"))?;
-    state.roots.lock().unwrap().push(path.clone());
+    state.roots.lock().unwrap().push((label, path.clone()));
     // watcher move 进线程保活；线程退出时自动 drop 停止监听
     std::thread::spawn(move || watch_loop(rx, app, path, watcher));
     Ok(())
@@ -99,7 +102,7 @@ pub fn stop_all_watches(state: State<'_, WatchState>) -> Result<(), String> {
 }
 
 fn stop_watch_inner(state: &WatchState, path: &str) -> Result<(), String> {
-    state.roots.lock().unwrap().retain(|r| r != path);
+    state.roots.lock().unwrap().retain(|(_, r)| r != path);
     Ok(())
 }
 
@@ -129,13 +132,16 @@ fn watch_loop(
     }
 }
 
+/// root 是否仍在监听列表，且其所属窗口存活（窗口销毁 → 返回 false → 线程退出，防泄漏）
 fn is_current_root(app: &AppHandle, root: &str) -> bool {
-    app.state::<WatchState>()
-        .roots
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|r| r == root)
+    let state = app.state::<WatchState>();
+    let roots = state.roots.lock().unwrap();
+    for (label, r) in roots.iter() {
+        if r == root {
+            return app.get_webview_window(label).is_some();
+        }
+    }
+    false
 }
 
 /// 合并去重并发射事件

@@ -104,6 +104,20 @@ export default function FileTree() {
 					await ts.openInReader(node.path);
 				}
 				break;
+			case "copyPath": {
+				// 复制完整路径到剪贴板（localhost/asset 上下文为 secure context）
+				try {
+					await navigator.clipboard.writeText(node.path);
+				} catch {
+					const ta = document.createElement("textarea");
+					ta.value = node.path;
+					document.body.appendChild(ta);
+					ta.select();
+					document.execCommand("copy");
+					ta.remove();
+				}
+				break;
+			}
 			case "newfile":
 			case "newdir": {
 				const isDir = action === "newdir";
@@ -198,6 +212,7 @@ export default function FileTree() {
 		...(isTxtFile
 			? [{ id: "reader", label: "以阅读模式打开", sep: true }]
 			: []),
+		{ id: "copyPath", label: "复制路径" },
 		{ id: "newfile", label: "新建文件" },
 		{ id: "newdir", label: "新建文件夹" },
 		{ id: "rename", label: "重命名" },

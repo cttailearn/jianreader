@@ -7,6 +7,7 @@ import { Compartment, EditorState } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { getLanguage } from "../utils/language";
 import { useCursorStore } from "../stores/ui";
+import { useSettingsStore } from "../stores/settings";
 
 interface Props {
 	path: string;
@@ -74,10 +75,14 @@ export default function CodeEditor({
 		});
 	}, [theme]);
 
-	// 语言包按需加载（大文件跳过：>3MB 纯文本打开，避免高亮解析卡顿）
+	// 语言包按需加载（大文件默认跳过：>3MB 纯文本打开，避免高亮解析卡顿；
+	// 设置里可开启大文件高亮，M9）
+	const largeFileHighlight = useSettingsStore(
+		(s) => s.settings.largeFileHighlight,
+	);
 	useEffect(() => {
 		let cancelled = false;
-		if (initialContent.length > NO_HIGHLIGHT_THRESHOLD) {
+		if (initialContent.length > NO_HIGHLIGHT_THRESHOLD && !largeFileHighlight) {
 			viewRef.current?.dispatch({ effects: langComp.reconfigure([]) });
 			return;
 		}
@@ -101,7 +106,7 @@ export default function CodeEditor({
 		return () => {
 			cancelled = true;
 		};
-	}, [path]);
+	}, [path, largeFileHighlight, initialContent.length]);
 
 	return <div className="code-editor-host" ref={hostRef} />;
 }
