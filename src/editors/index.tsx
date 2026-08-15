@@ -15,6 +15,8 @@ export interface EditorHostProps {
 	status: string;
 	mdView?: "wysiwyg" | "source";
 	lastError?: string;
+	/** 只读（磁盘属性/大文件保护） */
+	readonly?: boolean;
 	onChange: (content: string) => void;
 	onSync?: (content: string) => void;
 }
@@ -34,6 +36,7 @@ export default function EditorHost(props: EditorHostProps) {
 			<MarkdownEditor
 				path={props.path}
 				initialContent={props.content}
+				readonly={props.readonly}
 				onChange={props.onChange}
 				onSync={props.onSync}
 			/>

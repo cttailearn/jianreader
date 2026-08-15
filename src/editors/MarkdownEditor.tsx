@@ -25,6 +25,8 @@ interface Props {
 	onChange: (markdown: string) => void;
 	/** 静默同步（解析规范化，不标 dirty） */
 	onSync?: (markdown: string) => void;
+	/** 只读（磁盘属性/大文件保护） */
+	readonly?: boolean;
 }
 
 export default function MarkdownEditor({
@@ -32,6 +34,7 @@ export default function MarkdownEditor({
 	initialContent,
 	onChange,
 	onSync,
+	readonly = false,
 }: Props) {
 	const hostRef = useRef<HTMLDivElement>(null);
 	const ctxRef = useRef<Ctx | null>(null);
@@ -65,6 +68,7 @@ export default function MarkdownEditor({
 				[Crepe.Feature.Latex]: true,
 			},
 		});
+		if (readonly) crepe.setReadonly(true);
 
 		// 大纲刷新：读 ctx.get(editorViewCtx) 当前视图（Crepe 初始化期间会替换 view，
 		// mounted 时捕获的旧引用会读到未完成解析的 doc——实测旧引用 doc 只有 5 个标题）

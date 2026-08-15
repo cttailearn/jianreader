@@ -21,6 +21,10 @@ export default function NovelReader({ path }: Props) {
 	const setChapterText = useNovelStore((s) => s.setChapterText);
 	const setEditing = useNovelStore((s) => s.setEditing);
 	const updateSettings = useNovelStore((s) => s.updateSettings);
+	// 标签只读状态（磁盘只读属性 → 禁编辑/禁保存）
+	const tabReadonly = useTabsStore(
+		(s) => s.tabs.find((t) => t.path === path)?.readonly ?? false,
+	);
 
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const textRef = useRef<HTMLDivElement | null>(null);
@@ -183,6 +187,11 @@ export default function NovelReader({ path }: Props) {
 				</button>
 				<span className="novel-chapter-title">
 					{ch?.title ?? ""}
+					{tabReadonly && (
+						<span className="novel-lock" title="文件为只读（磁盘只读属性）">
+							🔒
+						</span>
+					)}
 					{book.dirtySet.has(book.chapterIdx) && (
 						<span className="novel-dirty-dot" title="本章已修改" />
 					)}
@@ -212,9 +221,9 @@ export default function NovelReader({ path }: Props) {
 				</button>
 				<button
 					className="novel-btn novel-btn-primary"
-					disabled={!book.dirtySet.has(book.chapterIdx)}
+					disabled={tabReadonly || !book.dirtySet.has(book.chapterIdx)}
 					onClick={() => void save()}
-					title="保存本章 (Ctrl+S)"
+					title={tabReadonly ? "只读文件无法保存" : "保存本章 (Ctrl+S)"}
 				>
 					💾 保存
 				</button>
@@ -343,6 +352,7 @@ export default function NovelReader({ path }: Props) {
 					<div
 						className="novel-text"
 						onClick={() => {
+							if (tabReadonly) return; // 只读：不可进入编辑态
 							setEditing(path, true);
 							// 光标定位：点击段落
 							requestAnimationFrame(() => {
@@ -357,7 +367,7 @@ export default function NovelReader({ path }: Props) {
 								}
 							});
 						}}
-						title="点击编辑本章"
+						title={tabReadonly ? "文件为只读" : "点击编辑本章"}
 					>
 						{paragraphs.map((p, i) => {
 							const hl =

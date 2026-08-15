@@ -32,6 +32,8 @@ pub struct ScanResult {
     pub encoding: String,
     pub has_bom: bool,
     pub eol: String,
+    /// 磁盘只读属性（小说标签同样禁止编辑）
+    pub readonly: bool,
 }
 
 /// 章节扫描结果（内部）
@@ -270,6 +272,9 @@ fn scan_bytes(bytes: &[u8], encoding: &str, has_bom: bool) -> ScanOut {
 pub fn scan_chapters(path: String) -> Result<ScanResult, String> {
     let bytes = fs::read(&path).map_err(|e| io_err(e, "读取文件"))?;
     let total_bytes = bytes.len() as u64;
+    let readonly = fs::metadata(&path)
+        .map(|m| m.permissions().readonly())
+        .unwrap_or(false);
     let (encoding, has_bom) = detect_encoding(&bytes[..bytes.len().min(65536)]);
 
     // UTF-16 罕见路径：全解码后按行扫描（字符切行）
@@ -287,6 +292,7 @@ pub fn scan_chapters(path: String) -> Result<ScanResult, String> {
         encoding: out.encoding,
         has_bom: out.has_bom,
         eol: out.eol,
+        readonly,
     })
 }
 

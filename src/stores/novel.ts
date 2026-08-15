@@ -25,6 +25,8 @@ export interface ScanResult {
 	encoding: string;
 	has_bom: boolean;
 	eol: string;
+	/** 磁盘只读属性（小说标签同样禁止编辑） */
+	readonly: boolean;
 }
 
 /** 阅读设置（每本书独立记忆） */

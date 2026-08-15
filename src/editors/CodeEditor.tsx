@@ -12,6 +12,8 @@ interface Props {
 	path: string;
 	initialContent: string;
 	theme: "light" | "dark";
+	/** 只读（磁盘属性/大文件保护）：禁用编辑与选区修改 */
+	readonly?: boolean;
 	onChange: (content: string) => void;
 }
 
@@ -22,6 +24,7 @@ export default function CodeEditor({
 	path,
 	initialContent,
 	theme,
+	readonly = false,
 	onChange,
 }: Props) {
 	const hostRef = useRef<HTMLDivElement>(null);
@@ -39,6 +42,8 @@ export default function CodeEditor({
 				basicSetup,
 				themeComp.of(theme === "dark" ? oneDark : []),
 				langComp.of([]),
+				EditorState.readOnly.of(readonly),
+				EditorView.editable.of(!readonly),
 				EditorView.updateListener.of((u) => {
 					if (u.docChanged) onChangeRef.current(u.state.doc.toString());
 					if (u.docChanged || u.selectionSet) {

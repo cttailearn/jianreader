@@ -48,6 +48,18 @@ export default function StatusBar() {
 						{doc.encoding}
 					</span>
 					<span className="statusbar-item">{doc.languageName}</span>
+					{doc.readonly && (
+						<span
+							className="statusbar-item statusbar-readonly"
+							title={
+								doc.readonlyReason === "large"
+									? "超过 5MB 已转只读保护"
+									: "磁盘只读属性"
+							}
+						>
+							🔒 只读
+						</span>
+					)}
 					<span className="statusbar-item">
 						行 {cursorPos.split(":")[0]}, 列 {cursorPos.split(":")[1]}
 					</span>

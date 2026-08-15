@@ -15,6 +15,8 @@ pub struct FilePayload {
     pub has_bom: bool,
     pub eol: String, // "\r\n" 或 "\n"（按多数行判定）
     pub size: u64,
+    /// 磁盘只读属性（Windows readonly 位），前端禁止编辑
+    pub readonly: bool,
 }
 
 /// 目录条目
@@ -141,6 +143,9 @@ fn detect_eol(text: &str) -> String {
 pub fn read_text_file(path: String) -> Result<FilePayload, String> {
     let bytes = fs::read(&path).map_err(|e| io_err(e, "读取文件"))?;
     let size = bytes.len() as u64;
+    let readonly = fs::metadata(&path)
+        .map(|m| m.permissions().readonly())
+        .unwrap_or(false);
     let (content, encoding, has_bom) = decode_text(&bytes);
     let eol = detect_eol(&content);
     Ok(FilePayload {
@@ -149,6 +154,7 @@ pub fn read_text_file(path: String) -> Result<FilePayload, String> {
         has_bom,
         eol,
         size,
+        readonly,
     })
 }
 

@@ -17,6 +17,9 @@ export type DocStatus =
 	| "deleted"
 	| "error";
 
+/** 大文件保护阈值：超过则转只读（design 7.2 / P1） */
+const LARGE_FILE_THRESHOLD = 5 * 1024 * 1024;
+
 export interface TabDoc {
 	path: string;
 	name: string;
@@ -33,6 +36,10 @@ export interface TabDoc {
 	mdView: "wysiwyg" | "source";
 	/** 小说模式标签：正文按章懒加载，不走全文 content */
 	isNovel: boolean;
+	/** 只读（磁盘只读属性 或 大文件保护），禁止编辑/保存 */
+	readonly: boolean;
+	/** 只读原因：disk 磁盘属性 / large 超过 5MB 保护 */
+	readonlyReason?: "disk" | "large";
 	lastError?: string;
 }
 
@@ -42,6 +49,7 @@ interface FilePayload {
 	has_bom: boolean;
 	eol: string;
 	size: number;
+	readonly: boolean;
 }
 
 function payloadToDoc(
@@ -58,6 +66,8 @@ function payloadToDoc(
 		size: p.size,
 		status,
 		rev: t.rev + 1,
+		readonly: p.readonly,
+		readonlyReason: p.readonly ? "disk" : undefined,
 		lastError: undefined,
 	};
 }
@@ -116,6 +126,7 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 			name: basename(path),
 			mdView: "wysiwyg",
 			isNovel: false,
+			readonly: false,
 			content: "",
 			encoding: "UTF-8",
 			hasBom: false,
@@ -131,6 +142,8 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 			const { useNovelStore } = await import("./novel");
 			const isNovel = await useNovelStore.getState().loadBook(path);
 			if (isNovel) {
+				const scanReadonly =
+					useNovelStore.getState().books.get(path)?.scan.readonly ?? false;
 				set((s) => ({
 					tabs: s.tabs.map((t) =>
 						t.path === path
@@ -139,6 +152,8 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 									isNovel: true,
 									status: "ready",
 									languageName: "小说",
+									readonly: scanReadonly,
+									readonlyReason: scanReadonly ? "disk" : undefined,
 								}
 							: t,
 					),
@@ -149,7 +164,15 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 		try {
 			const p = await invoke<FilePayload>("read_text_file", { path });
 			set((s) => ({
-				tabs: s.tabs.map((t) => (t.path === path ? payloadToDoc(t, p) : t)),
+				tabs: s.tabs.map((t) => {
+					if (t.path !== path) return t;
+					const next = payloadToDoc(t, p);
+					// 大文件保护：>5MB 转只读（design 7.2），避免整读卡顿
+					if (!next.readonly && next.size > LARGE_FILE_THRESHOLD) {
+						return { ...next, readonly: true, readonlyReason: "large" as const };
+					}
+					return next;
+				}),
 			}));
 		} catch (e) {
 			set((s) => ({
@@ -221,12 +244,42 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 	save: async (path) => {
 		const doc = get().tabs.find((t) => t.path === path);
 		if (!doc || doc.status === "saving") return false;
+		// 只读文件拦截（磁盘只读 / 大文件保护）
+		if (doc.readonly) {
+			const { showDialog } = await import("./dialog");
+			await showDialog({
+				title: "无法保存",
+				message: `「${doc.name}」为只读文件（${
+					doc.readonlyReason === "large" ? "超过 5MB 保护" : "磁盘只读属性"
+				}），无法保存。`,
+				buttons: [{ id: "ok", label: "确定", danger: false }],
+			});
+			return false;
+		}
 		// 小说标签：按章写回（write_chapter + 重解析章节表）
 		if (doc.isNovel) {
 			const { useNovelStore } = await import("./novel");
-			const ok = await useNovelStore.getState().saveChapter(path);
-			if (ok) get().setNovelDirty(path, false);
-			return ok;
+			try {
+				const ok = await useNovelStore.getState().saveChapter(path);
+				if (!ok) return false;
+				get().setNovelDirty(path, false);
+				return true;
+			} catch (e) {
+				set((s) => ({
+					tabs: s.tabs.map((t) =>
+						t.path === path
+							? { ...t, status: "dirty" as DocStatus, lastError: String(e) }
+							: t,
+					),
+				}));
+				const { showDialog } = await import("./dialog");
+				await showDialog({
+					title: "保存失败",
+					message: String(e),
+					buttons: [{ id: "ok", label: "确定", danger: false }],
+				});
+				return false;
+			}
 		}
 		set((s) => ({
 			tabs: s.tabs.map((t) =>

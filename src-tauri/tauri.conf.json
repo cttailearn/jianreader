@@ -18,8 +18,7 @@
         "height": 800,
         "minWidth": 900,
         "minHeight": 600,
-        "center": true,
-        "additionalBrowserArgs": "--remote-debugging-port=9222"
+        "center": true
       }
     ],
     "security": {
@@ -32,6 +31,11 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"]
+    "targets": ["nsis"],
+    "windows": {
+      "nsis": {
+        "languages": ["SimpChinese"]
+      }
+    }
   }
 }

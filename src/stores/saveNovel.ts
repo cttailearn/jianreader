@@ -7,8 +7,13 @@ export async function saveActiveNovel(path?: string): Promise<boolean> {
 	const st = useNovelStore.getState();
 	const target = path ?? st.activePath;
 	if (!target) return true;
-	const ok = await st.saveChapter(target);
-	// 保存后同步标签状态（dirty 清除）
-	useTabsStore.getState().setNovelDirty(target, false);
-	return ok;
+	try {
+		const ok = await st.saveChapter(target);
+		// 保存后同步标签状态（dirty 清除）
+		if (ok) useTabsStore.getState().setNovelDirty(target, false);
+		return ok;
+	} catch (e) {
+		console.error("小说章节保存失败:", e);
+		return false;
+	}
 }
