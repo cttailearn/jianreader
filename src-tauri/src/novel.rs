@@ -49,48 +49,56 @@ fn io_err(e: std::io::Error, action: &str) -> String {
     format!("{action}失败: {e}")
 }
 
-/// 编码检测（只喂头部 64KB；BOM 优先 → UTF-8 校验 → UTF-16 无 BOM 启发 → chardetng）
+/// GBK 序列合法性检测：头部 64KB 中，单字节 ASCII + 合法双字节对（前导 0x81-0xFE + 续 0x40-0xFE）
+/// 占比 ≥95% 视为"像 GBK"。用于 chardetng 误判拉丁系编码时的兜底（M8：中文 txt 乱码修复）。
+#[allow(dead_code)]
+fn gbk_plausible(bytes: &[u8]) -> bool {
+    let head = &bytes[..bytes.len().min(65536)];
+    if head.is_empty() {
+        return false;
+    }
+    let mut ok = 0usize;
+    let mut total = 0usize;
+    let mut i = 0usize;
+    while i < head.len() {
+        let b = head[i];
+        if b < 0x80 {
+            ok += 1;
+            total += 1;
+            i += 1;
+            continue;
+        }
+        if (0x81..=0xFE).contains(&b) && i + 1 < head.len() {
+            let c = head[i + 1];
+            if (0x40..=0xFE).contains(&c) && c != 0x7F {
+                ok += 1;
+            }
+            total += 1;
+            i += 2;
+            continue;
+        }
+        total += 1;
+        i += 1;
+    }
+    let dbl = head.len() - head.iter().filter(|&&b| b < 0x80).count();
+    total > 0 && dbl >= 8 && ok * 100 / total >= 95
+}
+
+/// chardetng 结果是否属于中文/多字节编码（拉丁系结果需要 GBK 兜底校验）
+#[allow(dead_code)]
+fn is_cjk_encoding(name: &str) -> bool {
+    matches!(
+        name,
+        "GBK" | "GB18030" | "GB2312" | "Big5" | "EUC-KR" | "EUC-JP" | "Shift_JIS" | "UTF-16"
+            | "UTF-16LE"
+            | "UTF-16BE" | "windows-949" | "ISO-2022-JP" | "ISO-2022-KR"
+    ) || name.starts_with("UTF-16")
+}
+
+/// 编码检测（只喂头部 64KB；BOM 优先 → UTF-8 校验 → UTF-16 无 BOM 启发 → chardetng + GBK 兜底）
+/// 与 fs.rs 的 decode_text 共用同一套检测逻辑（fs.rs 为唯一实现）
 fn detect_encoding(bytes: &[u8]) -> (String, bool) {
-    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
-        return ("UTF-8 BOM".into(), true);
-    }
-    if bytes.starts_with(&[0xFF, 0xFE]) {
-        return ("UTF-16 LE".into(), true);
-    }
-    if bytes.starts_with(&[0xFE, 0xFF]) {
-        return ("UTF-16 BE".into(), true);
-    }
-    if std::str::from_utf8(bytes).is_ok() {
-        return ("UTF-8".into(), false);
-    }
-    // UTF-16 无 BOM 启发：取前 4096 字节。
-    // UTF-16LE 文本按 2 字节分组时，高位字节 ∈ {0x00(ASCII)} ∪ {0x4E-0x9F(汉字)} ∪ {0xFF(全角标点)}，
-    // 中文为主的文本该比例 >90%；GBK/Big5 无此规律（续字节分布均匀）。
-    let head = &bytes[..bytes.len().min(4096)];
-    if head.len() >= 64 {
-        let half = head.len() / 2;
-        let odd_candidate = head
-            .iter()
-            .skip(1)
-            .step_by(2)
-            .filter(|&&b| b == 0 || (0x4E..=0x9F).contains(&b) || b == 0xFF)
-            .count();
-        let even_candidate = head
-            .iter()
-            .step_by(2)
-            .filter(|&&b| b == 0 || (0x4E..=0x9F).contains(&b) || b == 0xFF)
-            .count();
-        if odd_candidate > half * 85 / 100 {
-            return ("UTF-16 LE".into(), false);
-        }
-        if even_candidate > half * 85 / 100 {
-            return ("UTF-16 BE".into(), false);
-        }
-    }
-    let mut det = chardetng::EncodingDetector::new();
-    det.feed(bytes, true);
-    let enc = det.guess(None, true);
-    (enc.name().to_owned(), false)
+    crate::fs::detect_encoding(bytes)
 }
 
 /// 编码 label 规范化（detect 返回 "UTF-16 LE"/"UTF-8 BOM" 等显示名，
@@ -778,6 +786,22 @@ mod tests {
         let (enc, bom) = detect_encoding(&u16bytes);
         assert_eq!(enc, "UTF-16 LE");
         assert!(!bom);
+    }
+
+    #[test]
+    fn gbk_fallback_detection() {
+        // 纯 GBK 中文：detect 不应返回拉丁系（GBK 兜底生效）
+        let (enc_bytes, _, _) = encoding_rs::GBK.encode(
+            "第一章 测试，这是正文内容，用于编码检测验证。第二章 继续，更多正文内容。第三章 结束。\n",
+        );
+        let (enc, bom) = detect_encoding(&enc_bytes);
+        assert_eq!(enc, "GBK", "GBK 中文不应被误判为拉丁系");
+        assert!(!bom);
+        // 英文文本不误判为 GBK
+        let ascii = b"The quick brown fox jumps over the lazy dog. Hello world 123.\n".to_vec();
+        assert!(!gbk_plausible(&ascii));
+        let (enc2, _) = detect_encoding(&ascii);
+        assert_eq!(enc2, "UTF-8");
     }
 
     #[test]

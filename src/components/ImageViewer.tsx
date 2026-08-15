@@ -42,12 +42,13 @@ export default function ImageViewer({
 		setPos({ x: 0, y: 0 });
 	};
 
-	// 拖拽平移
+	// 拖拽平移（基准偏移用局部变量，避免闭包捕获过期的 state 导致图片跳位）
 	const onPointerDown = (e: React.PointerEvent) => {
 		if (e.button !== 0) return;
-		setDrag({ x: e.clientX - pos.x, y: e.clientY - pos.y });
+		const base = { x: e.clientX - pos.x, y: e.clientY - pos.y };
+		setDrag(base);
 		const onMove = (ev: PointerEvent) => {
-			setPos({ x: ev.clientX - (drag?.x ?? 0), y: ev.clientY - (drag?.y ?? 0) });
+			setPos({ x: ev.clientX - base.x, y: ev.clientY - base.y });
 		};
 		const onUp = () => {
 			window.removeEventListener("pointermove", onMove);

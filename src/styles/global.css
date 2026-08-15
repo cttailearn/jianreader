@@ -798,12 +798,21 @@ body {
 	background: var(--crepe-color-background, var(--bg));
 }
 
+/* MD 正文可选中复制（全局 user-select:none 需在此放行；粘贴编辑保持可用） */
+.markdown-host,
+.markdown-host .milkdown .editor,
+.markdown-host .milkdown .editor * {
+	user-select: text;
+	-webkit-user-select: text;
+	cursor: text;
+}
+
 .markdown-host .milkdown {
-	/* M7：正文显示区加宽（860 → 1080），仍保持居中阅读列 */
-	max-width: 1080px;
+	/* M8：正文显示区加宽（充分利用窗口宽度，减少两侧空白） */
+	max-width: 1500px;
 	margin: 0 auto;
 	min-height: 100%;
-	padding: 28px 51px 40vh;
+	padding: 28px 40px 40vh;
 	box-sizing: border-box;
 }
 

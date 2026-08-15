@@ -35,34 +35,129 @@ fn io_err(e: std::io::Error, action: &str) -> String {
     format!("{action}失败: {e}")
 }
 
-/// 检测并解码文本（不抛错，乱码场景用 lossy 兜底）
-fn decode_text(bytes: &[u8]) -> (String, String, bool) {
-    // 1) BOM 优先
+/// GBK 序列合法性检测：头部 64KB 中，单字节 ASCII + 合法双字节对（前导 0x81-0xFE + 续 0x40-0xFE）
+/// 占比 ≥95% 视为"像 GBK"。用于 chardetng 误判拉丁系编码时的兜底（M8：中文 txt 乱码修复）。
+fn gbk_plausible(bytes: &[u8]) -> bool {
+    let head = &bytes[..bytes.len().min(65536)];
+    if head.is_empty() {
+        return false;
+    }
+    let mut ok = 0usize;
+    let mut total = 0usize;
+    let mut i = 0usize;
+    while i < head.len() {
+        let b = head[i];
+        if b < 0x80 {
+            ok += 1;
+            total += 1;
+            i += 1;
+            continue;
+        }
+        if (0x81..=0xFE).contains(&b) && i + 1 < head.len() {
+            let c = head[i + 1];
+            if (0x40..=0xFE).contains(&c) && c != 0x7F {
+                ok += 1;
+            }
+            total += 1;
+            i += 2;
+            continue;
+        }
+        total += 1;
+        i += 1;
+    }
+    let dbl = head.len() - head.iter().filter(|&&b| b < 0x80).count();
+    total > 0 && dbl >= 8 && ok * 100 / total >= 95
+}
+
+/// chardetng 结果是否属于中文/多字节编码（拉丁系结果需要 GBK 兜底校验）
+fn is_cjk_encoding(name: &str) -> bool {
+    matches!(
+        name,
+        "GBK" | "GB18030" | "GB2312" | "Big5" | "EUC-KR" | "EUC-JP" | "Shift_JIS" | "UTF-16"
+            | "UTF-16LE"
+            | "UTF-16BE" | "windows-949" | "ISO-2022-JP" | "ISO-2022-KR"
+    ) || name.starts_with("UTF-16")
+}
+
+/// 编码检测（BOM 优先 → UTF-8 校验 → UTF-16 无 BOM 启发 → chardetng + GBK 兜底）。
+/// 返回 (编码显示名, has_bom)，供 fs/novel 共用。
+pub fn detect_encoding(bytes: &[u8]) -> (String, bool) {
     if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
-        return (
-            String::from_utf8_lossy(&bytes[3..]).into_owned(),
-            "UTF-8 BOM".into(),
-            true,
-        );
+        return ("UTF-8 BOM".into(), true);
     }
     if bytes.starts_with(&[0xFF, 0xFE]) {
-        let (s, _, _) = encoding_rs::UTF_16LE.decode(&bytes[2..]);
-        return (s.into_owned(), "UTF-16 LE".into(), true);
+        return ("UTF-16 LE".into(), true);
     }
     if bytes.starts_with(&[0xFE, 0xFF]) {
-        let (s, _, _) = encoding_rs::UTF_16BE.decode(&bytes[2..]);
-        return (s.into_owned(), "UTF-16 BE".into(), true);
+        return ("UTF-16 BE".into(), true);
     }
-    // 2) UTF-8 严格校验（SIMD 快速路径，覆盖绝大多数现代文件）
-    if let Ok(s) = std::str::from_utf8(bytes) {
-        return (s.to_owned(), "UTF-8".into(), false);
+    if std::str::from_utf8(bytes).is_ok() {
+        return ("UTF-8".into(), false);
     }
-    // 3) chardetng 猜测 + encoding_rs 解码（GBK/Big5/Shift_JIS...）
+    // UTF-16 无 BOM 启发：按 2 字节分组时，高位字节 ∈ {0x00(ASCII)} ∪ {0x4E-0x9F(汉字)} ∪ {0xFF(全角标点)}
+    let head = &bytes[..bytes.len().min(4096)];
+    if head.len() >= 64 {
+        let half = head.len() / 2;
+        let odd_candidate = head
+            .iter()
+            .skip(1)
+            .step_by(2)
+            .filter(|&&b| b == 0 || (0x4E..=0x9F).contains(&b) || b == 0xFF)
+            .count();
+        let even_candidate = head
+            .iter()
+            .step_by(2)
+            .filter(|&&b| b == 0 || (0x4E..=0x9F).contains(&b) || b == 0xFF)
+            .count();
+        if odd_candidate > half * 85 / 100 {
+            return ("UTF-16 LE".into(), false);
+        }
+        if even_candidate > half * 85 / 100 {
+            return ("UTF-16 BE".into(), false);
+        }
+    }
     let mut det = chardetng::EncodingDetector::new();
     det.feed(bytes, true);
     let enc = det.guess(None, true);
-    let (s, _, _) = enc.decode(bytes);
-    (s.into_owned(), enc.name().to_owned(), false)
+    let name = enc.name().to_owned();
+    // chardetng 误判拉丁系时，若字节序列高度符合 GBK → 兜底判定 GBK
+    if !is_cjk_encoding(&name) && gbk_plausible(bytes) {
+        return ("GBK".into(), false);
+    }
+    (name, false)
+}
+
+/// 检测并解码文本（不抛错，乱码场景用 lossy 兜底）
+fn decode_text(bytes: &[u8]) -> (String, String, bool) {
+    let (encoding, has_bom) = detect_encoding(bytes);
+    let s = match encoding.as_str() {
+        "UTF-8" => String::from_utf8_lossy(bytes).into_owned(),
+        "UTF-8 BOM" => String::from_utf8_lossy(&bytes[3..]).into_owned(),
+        "UTF-16 LE" => {
+            let start = if has_bom { 2 } else { 0 };
+            encoding_rs::UTF_16LE.decode(&bytes[start..]).0.into_owned()
+        }
+        "UTF-16 BE" => {
+            let start = if has_bom { 2 } else { 0 };
+            encoding_rs::UTF_16BE.decode(&bytes[start..]).0.into_owned()
+        }
+        label => {
+            let enc = encoding_rs::Encoding::for_label(norm_label(label).as_bytes())
+                .unwrap_or(encoding_rs::UTF_8);
+            enc.decode(bytes).0.into_owned()
+        }
+    };
+    (s, encoding, has_bom)
+}
+
+/// 编码 label 规范化（显示名 "UTF-16 LE"/"UTF-8 BOM" → encoding_rs 标准 label）
+fn norm_label<'a>(label: &'a str) -> &'a str {
+    match label {
+        "UTF-16 LE" => "UTF-16LE",
+        "UTF-16 BE" => "UTF-16BE",
+        "UTF-8 BOM" => "UTF-8",
+        other => other,
+    }
 }
 
 /// 按原编码编码回写（含 BOM 还原）
