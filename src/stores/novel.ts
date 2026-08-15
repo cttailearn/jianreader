@@ -38,7 +38,23 @@ export interface ReadingSettings {
 	contentWidth: number; // 60~80ch
 	/** 背景：米黄护眼（默认）/ 浅色 / 浅灰 / 夜间纯黑（与 app 主题解耦） */
 	bg: "sepia" | "light" | "gray" | "dark";
+	/** 手动指定文件编码（空 = 自动检测；乱码时切换重载） */
+	encoding?: string;
+	/** 自定义章节识别正则（空 = 内置规则；仅行首匹配，作用于去空白后的行） */
+	chapterRegex?: string;
 }
+
+/** 可选编码列表（阅读设置切换用） */
+export const ENCODING_OPTIONS = [
+	"自动检测",
+	"UTF-8",
+	"GBK",
+	"Big5",
+	"UTF-16LE",
+	"UTF-16BE",
+	"Shift_JIS",
+	"EUC-KR",
+] as const;
 
 export const DEFAULT_SETTINGS: ReadingSettings = {
 	fontSize: 19,
@@ -97,6 +113,8 @@ interface NovelState {
 	setEditing: (path: string, editing: boolean) => void;
 	setScrollPos: (path: string, pos: number) => void;
 	updateSettings: (path: string, patch: Partial<ReadingSettings>) => void;
+	/** 按当前设置（编码/章节正则）重新扫描章节表并重载（阅读设置变更后调用） */
+	reapplyScan: (path: string) => Promise<void>;
 	/** 保存当前章（按 offset 写回 + 重解析章节表） */
 	saveChapter: (path: string) => Promise<boolean>;
 	/** 标记某章 dirty（查找替换全书范围用） */
@@ -183,7 +201,12 @@ export const useNovelStore = create<NovelState>((set, get) => ({
 
 	loadBook: async (path, force = false) => {
 		try {
-			const scan = await invoke<ScanResult>("scan_chapters", { path });
+			const settings = loadSettings(path);
+			const scan = await invoke<ScanResult>("scan_chapters", {
+				path,
+				encodingOverride: settings.encoding || null,
+				customPattern: settings.chapterRegex || null,
+			});
 			if (!scan.is_novel && !(force && scan.total_bytes > 0)) return false;
 			// 无章节标题的 txt：以「全文」虚拟单章打开（M7：任意 txt 可阅读）
 			if (scan.chapters.length === 0) {
@@ -191,7 +214,6 @@ export const useNovelStore = create<NovelState>((set, get) => ({
 					{ title: "全文", start: 0, end: scan.total_bytes, level: 2 },
 				];
 			}
-			const settings = loadSettings(path);
 			const bookmark = loadBookmark(path);
 			const book: NovelBookState = {
 				path,
@@ -461,6 +483,52 @@ export const useNovelStore = create<NovelState>((set, get) => ({
 			if (cur) books.set(path, { ...cur, settings: next });
 			return { books };
 		});
+		// 编码 / 章节正则变更 → 重新扫描 + 重载（乱码/识别失败修复）
+		if ("encoding" in patch || "chapterRegex" in patch) {
+			void get().reapplyScan(path);
+		}
+	},
+
+	reapplyScan: async (path) => {
+		const book = get().books.get(path);
+		if (!book) return;
+		let scan: ScanResult;
+		try {
+			scan = await invoke<ScanResult>("scan_chapters", {
+				path,
+				encodingOverride: book.settings.encoding || null,
+				customPattern: book.settings.chapterRegex || null,
+			});
+		} catch {
+			return;
+		}
+		// 无章节 → 整本单章
+		if (scan.chapters.length === 0 && scan.total_bytes > 0) {
+			scan.chapters = [{ title: "全文", start: 0, end: scan.total_bytes, level: 2 }];
+		}
+		if (scan.chapters.length === 0) return;
+		set((s) => {
+			const books = new Map(s.books);
+			const cur = books.get(path);
+			if (cur) {
+				books.set(path, {
+					...cur,
+					scan,
+					chapterIdx: 0,
+					chapterText: "",
+					origText: "",
+					editing: false,
+					loading: false,
+					pageEnd: 0,
+					paging: false,
+					scrollPos: 0,
+					scrollMap: new Map(),
+					dirtySet: new Set(),
+				});
+			}
+			return { books };
+		});
+		await get().gotoChapter(path, 0);
 	},
 
 	saveChapter: async (path) => {

@@ -49,7 +49,7 @@ fn io_err(e: std::io::Error, action: &str) -> String {
     format!("{action}失败: {e}")
 }
 
-/// 编码检测（只喂头部 64KB；BOM 优先 → UTF-8 校验 → chardetng）
+/// 编码检测（只喂头部 64KB；BOM 优先 → UTF-8 校验 → UTF-16 无 BOM 启发 → chardetng）
 fn detect_encoding(bytes: &[u8]) -> (String, bool) {
     if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
         return ("UTF-8 BOM".into(), true);
@@ -63,10 +63,45 @@ fn detect_encoding(bytes: &[u8]) -> (String, bool) {
     if std::str::from_utf8(bytes).is_ok() {
         return ("UTF-8".into(), false);
     }
+    // UTF-16 无 BOM 启发：取前 4096 字节。
+    // UTF-16LE 文本按 2 字节分组时，高位字节 ∈ {0x00(ASCII)} ∪ {0x4E-0x9F(汉字)} ∪ {0xFF(全角标点)}，
+    // 中文为主的文本该比例 >90%；GBK/Big5 无此规律（续字节分布均匀）。
+    let head = &bytes[..bytes.len().min(4096)];
+    if head.len() >= 64 {
+        let half = head.len() / 2;
+        let odd_candidate = head
+            .iter()
+            .skip(1)
+            .step_by(2)
+            .filter(|&&b| b == 0 || (0x4E..=0x9F).contains(&b) || b == 0xFF)
+            .count();
+        let even_candidate = head
+            .iter()
+            .step_by(2)
+            .filter(|&&b| b == 0 || (0x4E..=0x9F).contains(&b) || b == 0xFF)
+            .count();
+        if odd_candidate > half * 85 / 100 {
+            return ("UTF-16 LE".into(), false);
+        }
+        if even_candidate > half * 85 / 100 {
+            return ("UTF-16 BE".into(), false);
+        }
+    }
     let mut det = chardetng::EncodingDetector::new();
     det.feed(bytes, true);
     let enc = det.guess(None, true);
     (enc.name().to_owned(), false)
+}
+
+/// 编码 label 规范化（detect 返回 "UTF-16 LE"/"UTF-8 BOM" 等显示名，
+/// encoding_rs::for_label 需要无空格的标准 label）
+fn norm_label<'a>(label: &'a str) -> &'a str {
+    match label {
+        "UTF-16 LE" => "UTF-16LE",
+        "UTF-16 BE" => "UTF-16BE",
+        "UTF-8 BOM" => "UTF-8",
+        other => other,
+    }
 }
 
 /// 按编码解码一行（仅用于扫描标题；UTF-16 在此路径不会出现）
@@ -74,7 +109,7 @@ fn decode_line(line: &[u8], encoding: &str) -> String {
     match encoding {
         "UTF-8" | "UTF-8 BOM" => String::from_utf8_lossy(line).into_owned(),
         label => {
-            let enc = encoding_rs::Encoding::for_label(label.as_bytes())
+            let enc = encoding_rs::Encoding::for_label(norm_label(label).as_bytes())
                 .unwrap_or(encoding_rs::UTF_8);
             let (s, _, _) = enc.decode(line);
             s.into_owned()
@@ -216,6 +251,7 @@ fn match_heading(line: &str) -> Option<u8> {
         match it.peek() {
             None => return Some(2),                                   // 纯数字
             Some('.') | Some('、') | Some('．') | Some('，') => return Some(2), // "12. 标题"
+            Some(' ') | Some('　') => return Some(2),                 // "3102 标题"（M8）
             _ => {}
         }
     }
@@ -264,10 +300,22 @@ fn match_heading(line: &str) -> Option<u8> {
 }
 
 /// 流式扫描章节表：字节切行 + 只解码短行
-fn scan_bytes(bytes: &[u8], encoding: &str, has_bom: bool) -> ScanOut {
+fn scan_bytes(
+    bytes: &[u8],
+    encoding: &str,
+    has_bom: bool,
+    custom_re: Option<&regex::Regex>,
+) -> ScanOut {
     let total = bytes.len() as u64;
     // 短行字节上限：30 中文字符（GBK 2B/字 = 60；UTF-8 3B/字 = 96；留裕量）
-    let max_line_bytes: usize = if encoding.starts_with("UTF-8") { 96 } else { 64 };
+    // 自定义正则场景放宽到 256B（用户正则可能匹配稍长标题行）
+    let max_line_bytes: usize = if custom_re.is_some() {
+        256
+    } else if encoding.starts_with("UTF-8") {
+        96
+    } else {
+        64
+    };
     let mut chapters: Vec<ChapterInfo> = Vec::new();
     let mut crlf = 0usize;
     let mut lf = 0usize;
@@ -294,9 +342,20 @@ fn scan_bytes(bytes: &[u8], encoding: &str, has_bom: bool) -> ScanOut {
         if !line.is_empty() && line.len() <= max_line_bytes {
             let text = decode_line(line, encoding);
             let trimmed = text.trim();
-            // 30 字上限（含标题后文字）
-            if !trimmed.is_empty() && trimmed.chars().count() <= 30 {
-                if let Some(level) = match_heading(trimmed) {
+            // 30 字上限（含标题后文字；自定义正则场景放宽到 60 字）
+            let limit = if custom_re.is_some() { 60 } else { 30 };
+            if !trimmed.is_empty() && trimmed.chars().count() <= limit {
+                let level = if let Some(re) = custom_re {
+                    // 自定义正则：匹配行即视为章节（用户自己控制规则）
+                    if re.is_match(trimmed) {
+                        Some(2)
+                    } else {
+                        None
+                    }
+                } else {
+                    match_heading(trimmed)
+                };
+                if let Some(level) = level {
                     chapters.push(ChapterInfo {
                         title: trimmed.chars().take(40).collect(),
                         start: line_start,
@@ -334,21 +393,37 @@ fn scan_bytes(bytes: &[u8], encoding: &str, has_bom: bool) -> ScanOut {
 }
 
 /// 扫描章节表（小说模式判定入口）
+/// - encoding_override：阅读设置手动指定编码时跳过自动检测（乱码时切换用）
+/// - custom_pattern：阅读设置自定义章节正则（逐行匹配，行首优先）
 #[tauri::command]
-pub fn scan_chapters(path: String) -> Result<ScanResult, String> {
+pub fn scan_chapters(
+    path: String,
+    encoding_override: Option<String>,
+    custom_pattern: Option<String>,
+) -> Result<ScanResult, String> {
     let bytes = fs::read(&path).map_err(|e| io_err(e, "读取文件"))?;
     let total_bytes = bytes.len() as u64;
     let readonly = fs::metadata(&path)
         .map(|m| m.permissions().readonly())
         .unwrap_or(false);
-    let (encoding, has_bom) = detect_encoding(&bytes[..bytes.len().min(65536)]);
+    let (encoding, has_bom) = match encoding_override {
+        Some(enc) => (enc, false),
+        None => detect_encoding(&bytes[..bytes.len().min(65536)]),
+    };
+
+    // 自定义正则（用户提供，逐行匹配；只对短行执行控制开销）
+    let custom_re = custom_pattern
+        .as_deref()
+        .map(|p| regex::Regex::new(p))
+        .transpose()
+        .map_err(|e| format!("正则无效: {e}"))?;
 
     // UTF-16 罕见路径：全解码后按行扫描（字符切行）
     let out = if encoding.starts_with("UTF-16") {
         let (s, _, _) = encoding_rs::UTF_16LE.decode(&bytes);
         scan_utf16_str(&s, &encoding, has_bom)
     } else {
-        scan_bytes(&bytes, &encoding, has_bom)
+        scan_bytes(&bytes, &encoding, has_bom, custom_re.as_ref())
     };
 
     Ok(ScanResult {
@@ -437,7 +512,7 @@ fn trim_trailing_partial_char(buf: &[u8], encoding: &str) -> usize {
     } else {
         // GBK/Big5 等：前导/续字节范围重叠，无法按字节判定边界。
         // 直接用解码结果回退：末尾若为截断产生的替换字符（U+FFFD），回退 1 字节重试（双字节编码最多回退 1）。
-        let enc = encoding_rs::Encoding::for_label(encoding.as_bytes())
+        let enc = encoding_rs::Encoding::for_label(norm_label(encoding).as_bytes())
             .unwrap_or(encoding_rs::UTF_8);
         let mut len = buf.len();
         for _ in 0..2 {
@@ -465,7 +540,7 @@ pub fn read_chapter(path: String, start: u64, end: u64, encoding: String) -> Res
     buf.truncate(read);
     let keep = trim_trailing_partial_char(&buf, &encoding);
     buf.truncate(keep);
-    let enc = encoding_rs::Encoding::for_label(encoding.as_bytes())
+    let enc = encoding_rs::Encoding::for_label(norm_label(&encoding).as_bytes())
         .unwrap_or(encoding_rs::UTF_8);
     let (s, _, _) = enc.decode(&buf);
     Ok(s.into_owned())
@@ -484,7 +559,7 @@ fn write_chapter_impl(
     let bytes = fs::read(path).map_err(|e| io_err(e, "读取文件"))?;
     // 规范化 EOL + 编码
     let normalized = crate::fs::normalize_eol(content, eol);
-    let enc = encoding_rs::Encoding::for_label(encoding.as_bytes())
+    let enc = encoding_rs::Encoding::for_label(norm_label(encoding).as_bytes())
         .unwrap_or(encoding_rs::UTF_8);
     let mut repl: Vec<u8> = Vec::new();
     if start == 0 && has_bom {
@@ -528,7 +603,7 @@ mod tests {
     use super::*;
 
     fn scan(s: &str) -> Vec<(String, u8, u64, u64)> {
-        let out = scan_bytes(s.as_bytes(), "UTF-8", false);
+        let out = scan_bytes(s.as_bytes(), "UTF-8", false, None);
         out.chapters
             .iter()
             .map(|c| (c.title.clone(), c.level, c.start, c.end))
@@ -596,7 +671,7 @@ mod tests {
         // GBK 编码的中文章节
         let gbk = encoding_rs::GBK;
         let (enc, _, _) = gbk.encode("第一章 测试\n这是正文内容。\n第二章 继续\n");
-        let out = scan_bytes(&enc, "GBK", false);
+        let out = scan_bytes(&enc, "GBK", false, None);
         assert_eq!(out.chapters.len(), 2);
         assert_eq!(out.chapters[0].title, "第一章 测试");
     }
@@ -666,6 +741,46 @@ mod tests {
     }
 
     #[test]
+    fn number_space_title() {
+        // 行首数字 + 空格 + 标题（M8）
+        let s = "3101 言\n内容\n3102 一人一龟\n内容\n3103 威尼斯商界峰会\n";
+        let ch = scan(s);
+        assert_eq!(ch.len(), 3);
+        assert_eq!(ch[0].0, "3101 言");
+        assert_eq!(ch[1].0, "3102 一人一龟");
+    }
+
+    #[test]
+    fn custom_regex_chapters() {
+        // 自定义正则：匹配 "【xxx】" 形式
+        let re = regex::Regex::new(r"^【.+】").unwrap();
+        let s = "【001】序章\n内容\n【002】第一章\n内容\n【003】终章\n";
+        let out = scan_bytes(s.as_bytes(), "UTF-8", false, Some(&re));
+        assert_eq!(out.chapters.len(), 3);
+        assert_eq!(out.chapters[0].title, "【001】序章");
+        assert_eq!(out.chapters[2].title, "【003】终章");
+        // 无匹配 → 空
+        let re2 = regex::Regex::new(r"^第X章").unwrap();
+        let out2 = scan_bytes(s.as_bytes(), "UTF-8", false, Some(&re2));
+        assert_eq!(out2.chapters.len(), 0);
+    }
+
+    #[test]
+    fn utf16_without_bom_detected() {
+        // UTF-16LE 无 BOM 文本 → 启发式应检出 UTF-16 LE（样本需 ≥64 字节）
+        let long =
+            "第一章 测试，这是正文内容，用于编码检测验证。第二章 继续，更多正文内容。第三章 结束。\n";
+        let mut u16bytes: Vec<u8> = Vec::new();
+        for ch in long.encode_utf16() {
+            u16bytes.extend_from_slice(&ch.to_le_bytes());
+        }
+        assert!(u16bytes.len() >= 64);
+        let (enc, bom) = detect_encoding(&u16bytes);
+        assert_eq!(enc, "UTF-16 LE");
+        assert!(!bom);
+    }
+
+    #[test]
     fn prose_no_false_positive_extended() {
         // 散文行不应误判（含"（一）"开头的中文段落长度受限，但句子中含编号不误判）
         let s = "我们谈到（一）个话题，聊了很久。\n他说（2）年前的事，我记不清了。\n";
@@ -715,7 +830,7 @@ mod tests {
             "{}/../test-fixtures/test-novel.txt",
             env!("CARGO_MANIFEST_DIR")
         );
-        let r = scan_chapters(path.clone()).unwrap();
+        let r = scan_chapters(path.clone(), None, None).unwrap();
         assert!(r.is_novel, "UTF-8 fixture 应判为小说");
         assert_eq!(r.encoding, "UTF-8");
         assert!(r.chapters.len() >= 3);
@@ -742,7 +857,7 @@ mod tests {
         assert_eq!(size, r.total_bytes);
 
         // 重扫章节表一致
-        let r2 = scan_chapters(path).unwrap();
+        let r2 = scan_chapters(path, None, None).unwrap();
         assert_eq!(r2.chapters.len(), r.chapters.len());
     }
 
@@ -753,7 +868,7 @@ mod tests {
             "{}/../test-fixtures/test-novel-gbk.txt",
             env!("CARGO_MANIFEST_DIR")
         );
-        let r = scan_chapters(path.clone()).unwrap();
+        let r = scan_chapters(path.clone(), None, None).unwrap();
         assert!(r.is_novel, "GBK fixture 应判为小说");
         assert_eq!(r.encoding, "GBK");
         assert_eq!(r.chapters[0].title, "第1章 测试章节标题");
@@ -785,7 +900,7 @@ mod bench {
         let bytes = s.as_bytes();
         eprintln!("size: {} MB, lines: {}", bytes.len() / 1024 / 1024, s.lines().count());
         let t0 = Instant::now();
-        let out = scan_bytes(bytes, "UTF-8", false);
+        let out = scan_bytes(bytes, "UTF-8", false, None);
         let ms = t0.elapsed().as_millis();
         eprintln!("scan 50MB: {ms}ms, chapters: {}", out.chapters.len());
         assert_eq!(out.chapters.len(), 5200);

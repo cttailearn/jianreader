@@ -7,7 +7,11 @@
 //! - 切章记忆滚动位置；重开书籍直达上次位置（loadBook 已恢复）
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNovelStore, type ReadingSettings } from "../stores/novel";
+import {
+	ENCODING_OPTIONS,
+	useNovelStore,
+	type ReadingSettings,
+} from "../stores/novel";
 import { saveActiveNovel } from "../stores/saveNovel";
 import { useTabsStore } from "../stores/tabs";
 
@@ -238,6 +242,24 @@ export default function NovelReader({ path }: Props) {
 				>
 					⚙️ 阅读设置
 				</button>
+				{book.editing ? (
+					<button
+						className="novel-btn"
+						onClick={() => setEditing(path, false)}
+						title="完成编辑"
+					>
+						✅ 完成
+					</button>
+				) : (
+					<button
+						className="novel-btn"
+						onClick={enterEdit}
+						disabled={tabReadonly}
+						title={tabReadonly ? "只读文件不可编辑" : "编辑本章（也可点击正文进入）"}
+					>
+						✏️ 编辑本章
+					</button>
+				)}
 				<button
 					className="novel-btn novel-btn-primary"
 					disabled={tabReadonly || !book.dirtySet.has(book.chapterIdx)}
@@ -449,6 +471,7 @@ function SettingsPanel({
 		{ id: "gray", label: "浅灰" },
 		{ id: "dark", label: "夜间纯黑" },
 	];
+	const [regexDraft, setRegexDraft] = useState(settings.chapterRegex ?? "");
 	return (
 		<div className="novel-settings">
 			<div className="novel-settings-row">
@@ -519,9 +542,51 @@ function SettingsPanel({
 					))}
 				</div>
 			</div>
+			{/* 文件编码（乱码时切换，自动重扫重载） */}
+			<div className="novel-settings-row novel-settings-encoding">
+				<label>文件编码</label>
+				<select
+					className="novel-settings-select"
+					value={settings.encoding ?? ""}
+					onChange={(e) => {
+						const v = e.target.value;
+						onChange({ encoding: v === "" ? undefined : v });
+					}}
+					title="乱码时切换编码，自动重新扫描章节并重载"
+				>
+					{ENCODING_OPTIONS.map((opt) => (
+						<option key={opt} value={opt === "自动检测" ? "" : opt}>
+							{opt}
+						</option>
+					))}
+				</select>
+			</div>
+			{/* 自定义章节识别正则（空 = 内置规则） */}
+			<div className="novel-settings-row novel-settings-regex">
+				<label>章节正则</label>
+				<input
+					className="novel-settings-input"
+					placeholder="如：^【.+】 或 ^第.+[章回]"
+					value={regexDraft}
+					onChange={(e) => setRegexDraft(e.target.value)}
+					onKeyDown={(e) => {
+						if (e.key === "Enter") {
+							onChange({ chapterRegex: regexDraft.trim() || undefined });
+						}
+					}}
+					title="正则匹配的行视为章节标题（作用于行首去空白后的行），回车应用并重新扫描"
+				/>
+				<button
+					className="novel-btn"
+					onClick={() => onChange({ chapterRegex: regexDraft.trim() || undefined })}
+				>
+					应用
+				</button>
+			</div>
 			<button
 				className="novel-btn"
 				onClick={() => {
+					setRegexDraft("");
 					onChange({
 						fontSize: 19,
 						lineHeight: 2.0,
@@ -529,6 +594,8 @@ function SettingsPanel({
 						paraSpacing: 0.8,
 						contentWidth: 70,
 						bg: "sepia",
+						encoding: undefined,
+						chapterRegex: undefined,
 					});
 				}}
 			>

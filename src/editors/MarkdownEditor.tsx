@@ -16,6 +16,7 @@ import type { Ctx } from "@milkdown/kit/ctx";
 import { TextSelection } from "@milkdown/prose/state";
 import {
 	dirnameOf,
+	normalizeTables,
 	resolveMarkdownImages,
 	unresolveMarkdownImages,
 } from "../utils/mdImage";
@@ -56,7 +57,8 @@ export default function MarkdownEditor({
 
 		const crepe = new Crepe({
 			root: host,
-			defaultValue: resolveMarkdownImages(initialContent, dir),
+			// 渲染前规范化：无表头分隔行的管道表格自动补分隔行（否则 GFM 不渲染）
+			defaultValue: normalizeTables(resolveMarkdownImages(initialContent, dir)),
 			features: {
 				[Crepe.Feature.CodeMirror]: true, // 代码块内嵌 CM6（高亮+编辑）
 				[Crepe.Feature.ListItem]: true,

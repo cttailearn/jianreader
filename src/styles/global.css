@@ -803,7 +803,7 @@ body {
 	max-width: 1080px;
 	margin: 0 auto;
 	min-height: 100%;
-	padding: 28px 56px 40vh;
+	padding: 28px 51px 40vh;
 	box-sizing: border-box;
 }
 
@@ -1494,6 +1494,29 @@ body {
 
 .novel-settings-bg {
 	flex-basis: 100%;
+}
+
+/* 编码选择 / 章节正则（M8） */
+.novel-settings-select,
+.novel-settings-input {
+	padding: 4px 8px;
+	font-size: 12px;
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	background: var(--bg-secondary);
+	color: var(--text);
+	outline: none;
+}
+
+.novel-settings-select:focus,
+.novel-settings-input:focus {
+	border-color: var(--accent);
+}
+
+.novel-settings-regex .novel-settings-input {
+	flex: 1;
+	min-width: 140px;
+	font-family: "Cascadia Code", Consolas, monospace;
 }
 
 .novel-bg-options {
