@@ -47,7 +47,6 @@ function TocItemRow({
 				) : (
 					<span className="toc-caret placeholder" />
 				)}
-				<span className="toc-text">{"#".repeat(Math.min(item.level, 3))}</span>
 				<span className="toc-name">{item.text}</span>
 			</div>
 			{hasChildren &&

@@ -424,6 +424,7 @@ ready/dirty ─磁盘上被删除→ deleted（标签灰化 + 提示，保存时
 | **M4 MD 所见即所得** ✅ 已完成 | Milkdown Crepe 装配（表格/代码/图片/公式/Mermaid）+ 大纲侧栏跳转 + 主题联动 + 源码模式 | MD 文档单界面编辑即预览，大纲点击跳转、跟随滚动 |
 | **M5 小说模式** ✅ 已完成 | 章节解析 + 阅读视图 + 阅读设置 + 章内直接编辑 + 查找替换 + 书签续读 | 50MB 小说 1s 内打开（实测扫描 20ms），目录跳转、设置生效、编辑保存回写（UTF-8/GBK fixture 往返测试通过） |
 | **M6 打磨打包** ✅ 已完成 | 大文件保护（>5MB 只读）、会话恢复（目录/标签/窗口）、只读文件处理（磁盘属性🔒）、打包配置（移除 CDP 参数、nsis 简体中文） | 安装包 `简阅_0.1.0_x64-setup.exe`（3.8MB）+ 绿色版 `release/简阅-绿色版-*.zip`（4.6MB）已产出，release exe 冒烟启动通过 |
+| **M7 体验美化** ✅ 已完成 | MD 渲染修复（大纲去 # 标记、补 Crepe 组件样式含表格）+ 表格/排版精修、左右栏拖拽调宽、拖入目录/文件打开、macOS 风格界面（无边框+交通灯+毛玻璃+圆角） | 前端构建 + Rust 测试通过，release 冒烟 9s 出窗口正常关闭 |
 
 > ⚠️ 修复记录（2026-08-15）：release 版闪退根因 = `[profile.release] strip = true` 剥离 WebView2Loader 静态链接所需符号，release 启动即 panic（dev 正常）。已移除 strip 并加入 panic 诊断（stderr + crash.log + 弹窗）。另注意：强杀应用进程会污染 WebView2 user data（`%LOCALAPPDATA%\com.jianreader.app\EBWebView`），下次启动可能挂起无窗口，删除该目录即可恢复。
 

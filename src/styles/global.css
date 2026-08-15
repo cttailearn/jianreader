@@ -13,19 +13,48 @@ body,
 
 body {
 	font-family:
-		"Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+		"Segoe UI Variable", "Segoe UI", "Microsoft YaHei", "PingFang SC",
+		system-ui, sans-serif;
 	font-size: 14px;
 	color: var(--text);
-	background: var(--bg);
+	/* 透明窗口：背景由 .app 绘制（含圆角），body 必须透明 */
+	background: transparent;
 	-webkit-font-smoothing: antialiased;
 	user-select: none;
 }
 
-/* ============ 应用骨架布局 ============ */
+/* 细滚动条（macOS 风格） */
+::-webkit-scrollbar {
+	width: 9px;
+	height: 9px;
+}
+
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+	background: color-mix(in srgb, var(--text-muted) 35%, transparent);
+	border-radius: 5px;
+	border: 2px solid transparent;
+	background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: color-mix(in srgb, var(--text-muted) 55%, transparent);
+	border: 2px solid transparent;
+	background-clip: content-box;
+}
+
+/* ============ 应用骨架布局（macOS 风格，M7） ============ */
 .app {
 	display: flex;
 	flex-direction: column;
 	height: 100%;
+	border-radius: 12px;
+	overflow: hidden;
+	background: var(--bg);
+	/* 窗口阴影由 DWM 提供（shadow:true），此处仅兜底 */
 }
 
 .app-main {
@@ -34,11 +63,8 @@ body {
 	min-height: 0; /* 允许子项收缩，编辑区滚动正确 */
 }
 
-/* 左侧：目录树占位（M2 实装） */
+/* 左侧：目录树 / 章节目录 */
 .panel-left {
-	width: 260px;
-	min-width: 180px;
-	max-width: 480px;
 	flex-shrink: 0;
 	border-right: 1px solid var(--border);
 	background: var(--bg-secondary);
@@ -121,25 +147,103 @@ body {
 	font-family: "Cascadia Code", Consolas, monospace;
 }
 
-/* ============ 顶栏 ============ */
+/* ============ 顶栏（macOS 风格） ============ */
 .topbar {
-	height: 40px;
+	height: var(--titlebar-h);
 	flex-shrink: 0;
 	display: flex;
 	align-items: center;
 	gap: 8px;
 	padding: 0 12px;
+	background: var(--glass-bg);
+	-webkit-backdrop-filter: blur(18px) saturate(1.6);
+	backdrop-filter: blur(18px) saturate(1.6);
 	border-bottom: 1px solid var(--border);
-	background: var(--bg-secondary);
+	position: relative;
+	z-index: 10;
+}
+
+/* 交通灯（macOS 红黄绿） */
+.mac-lights {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-shrink: 0;
+	padding: 0 4px;
+}
+
+.mac-light {
+	position: relative;
+	width: 13px;
+	height: 13px;
+	border-radius: 50%;
+	border: none;
+	padding: 0;
+	cursor: pointer;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	transition: filter 0.15s ease;
+}
+
+.mac-light span {
+	opacity: 0;
+	font-size: 10px;
+	line-height: 1;
+	color: rgba(0, 0, 0, 0.55);
+	font-weight: 700;
+	transition: opacity 0.15s ease;
+}
+
+.mac-lights:hover .mac-light span {
+	opacity: 1;
+}
+
+.mac-light:active {
+	filter: brightness(0.82);
+}
+
+.mac-light-close {
+	background: #ff5f57;
+	box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.12);
+}
+
+.mac-light-min {
+	background: #febc2e;
+	box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.12);
+}
+
+.mac-light-max {
+	background: #28c840;
+	box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.12);
+}
+
+/* 标题 + 拖拽区 */
+.topbar-center {
+	flex: 1;
+	min-width: 0;
+	height: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: default;
 }
 
 .topbar-title {
 	font-weight: 600;
 	font-size: 13px;
-	margin-right: auto;
+	color: var(--text);
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
+	max-width: 60%;
+}
+
+.topbar-actions {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	flex-shrink: 0;
 }
 
 /* ============ 通用小按钮 ============ */
@@ -150,11 +254,12 @@ body {
 	width: 28px;
 	height: 28px;
 	border: none;
-	border-radius: 5px;
+	border-radius: var(--radius-sm);
 	background: transparent;
 	color: var(--text);
 	font-size: 15px;
 	cursor: pointer;
+	transition: background 0.12s ease;
 }
 
 .icon-btn:hover {
@@ -165,16 +270,63 @@ body {
 	background: var(--active);
 }
 
+.icon-btn:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+
+/* ============ 面板拖拽把手 ============ */
+.panel-resizer {
+	width: 5px;
+	flex-shrink: 0;
+	cursor: col-resize;
+	position: relative;
+	z-index: 5;
+	background: transparent;
+	transition: background 0.12s ease;
+}
+
+.panel-resizer:hover,
+.panel-resizer:active {
+	background: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+/* ============ 拖入文件遮罩 ============ */
+.drop-overlay {
+	position: fixed;
+	inset: 12px;
+	z-index: 3000;
+	border-radius: var(--radius-lg);
+	border: 2px dashed var(--accent);
+	background: color-mix(in srgb, var(--accent) 8%, transparent);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	pointer-events: none;
+}
+
+.drop-overlay-inner {
+	padding: 18px 36px;
+	border-radius: var(--radius-md);
+	background: var(--bg-elevated);
+	box-shadow: var(--shadow-2);
+	color: var(--accent);
+	font-size: 16px;
+	font-weight: 600;
+}
+
 /* ============ 状态栏 ============ */
 .statusbar {
-	height: 24px;
+	height: 26px;
 	flex-shrink: 0;
 	display: flex;
 	align-items: center;
 	gap: 0;
-	padding: 0 4px;
+	padding: 0 6px;
 	border-top: 1px solid var(--border);
-	background: var(--bg-secondary);
+	background: var(--glass-bg);
+	-webkit-backdrop-filter: blur(14px) saturate(1.4);
+	backdrop-filter: blur(14px) saturate(1.4);
 	font-size: 12px;
 	color: var(--text-muted);
 }
@@ -252,7 +404,7 @@ body {
 }
 
 .ft-row {
-	height: 24px;
+	height: 26px;
 	display: flex;
 	align-items: center;
 	gap: 6px;
@@ -261,6 +413,7 @@ body {
 	white-space: nowrap;
 	font-size: 13px;
 	color: var(--text);
+	border-radius: var(--radius-sm);
 }
 
 .ft-row:hover {
@@ -269,6 +422,7 @@ body {
 
 .ft-row.active {
 	background: var(--active);
+	color: var(--text);
 }
 
 .ft-row .ft-icon {
@@ -299,17 +453,19 @@ body {
 .context-menu {
 	position: fixed;
 	z-index: 1000;
-	min-width: 170px;
-	padding: 4px;
-	background: var(--surface);
+	min-width: 180px;
+	padding: 5px;
+	background: var(--glass-bg);
+	-webkit-backdrop-filter: blur(20px) saturate(1.6);
+	backdrop-filter: blur(20px) saturate(1.6);
 	border: 1px solid var(--border);
-	border-radius: 6px;
-	box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+	border-radius: var(--radius-md);
+	box-shadow: var(--shadow-2);
 }
 
 .context-menu-item {
 	padding: 6px 12px;
-	border-radius: 4px;
+	border-radius: var(--radius-sm);
 	font-size: 13px;
 	cursor: pointer;
 	color: var(--text);
@@ -324,18 +480,24 @@ body {
 	color: var(--danger);
 }
 
-/* ============ 标签页 ============ */
+/* ============ 标签页（macOS 胶囊风格） ============ */
 .tabbar {
-	height: 36px;
+	height: 40px;
 	flex-shrink: 0;
 	display: flex;
+	align-items: flex-end;
+	padding: 0 8px 6px;
 	border-bottom: 1px solid var(--border);
-	background: var(--bg-secondary);
+	background: var(--glass-bg);
+	-webkit-backdrop-filter: blur(14px) saturate(1.4);
+	backdrop-filter: blur(14px) saturate(1.4);
 	overflow: hidden;
 }
 
 .tabbar-scroll {
 	display: flex;
+	align-items: flex-end;
+	gap: 6px;
 	overflow-x: auto;
 	scrollbar-width: none;
 }
@@ -351,23 +513,30 @@ body {
 	padding: 0 8px 0 12px;
 	max-width: 200px;
 	min-width: 110px;
-	height: 100%;
-	border-right: 1px solid var(--border);
+	height: 30px;
+	border: 1px solid transparent;
+	border-radius: var(--radius-md) var(--radius-md) 0 0;
 	cursor: pointer;
 	font-size: 13px;
 	color: var(--text-muted);
 	user-select: none;
 	white-space: nowrap;
+	transition:
+		background 0.12s ease,
+		color 0.12s ease;
 }
 
 .tab:hover {
 	background: var(--hover);
+	color: var(--text);
 }
 
 .tab.active {
-	background: var(--bg);
+	background: var(--bg-elevated);
 	color: var(--text);
-	box-shadow: inset 0 2px 0 var(--accent);
+	border-color: var(--border);
+	border-bottom-color: transparent;
+	box-shadow: 0 -1px 4px rgba(0, 0, 0, 0.04);
 }
 
 .tab-icon {
@@ -489,9 +658,6 @@ body {
 
 /* ============ 右侧栏（MD 大纲） ============ */
 .panel-right {
-	width: 220px;
-	min-width: 150px;
-	max-width: 360px;
 	flex-shrink: 0;
 	border-left: 1px solid var(--border);
 	background: var(--bg-secondary);
@@ -543,6 +709,8 @@ body {
 	align-items: center;
 	gap: 4px;
 	padding: 4px 8px;
+	margin: 0 6px;
+	border-radius: var(--radius-sm);
 	cursor: pointer;
 	font-size: 12.5px;
 	color: var(--text);
@@ -573,12 +741,6 @@ body {
 
 .toc-caret.placeholder {
 	cursor: default;
-}
-
-.toc-text {
-	flex-shrink: 0;
-	font-size: 10px;
-	color: var(--text-muted);
 }
 
 .toc-name {
@@ -628,6 +790,172 @@ body {
 	--crepe-color-inline-area: #111418;
 }
 
+/* ============ MD 排版精修（M7） ============ */
+.markdown-host .milkdown .editor {
+	font-size: 15.5px;
+	line-height: 1.85;
+	color: var(--crepe-color-on-background);
+}
+
+/* 标题：清晰层级 + 合理间距 */
+.markdown-host .milkdown .editor h1 {
+	font-size: 1.85em;
+	line-height: 1.35;
+	margin: 1.3em 0 0.55em;
+	padding-bottom: 0.3em;
+	border-bottom: 1px solid var(--crepe-color-outline);
+	font-weight: 700;
+	letter-spacing: 0.01em;
+}
+
+.markdown-host .milkdown .editor h2 {
+	font-size: 1.5em;
+	line-height: 1.4;
+	margin: 1.15em 0 0.5em;
+	padding-bottom: 0.25em;
+	border-bottom: 1px solid var(--crepe-color-outline);
+	font-weight: 700;
+}
+
+.markdown-host .milkdown .editor h3 {
+	font-size: 1.25em;
+	margin: 1em 0 0.45em;
+	font-weight: 650;
+}
+
+.markdown-host .milkdown .editor h4 {
+	font-size: 1.08em;
+	margin: 0.9em 0 0.4em;
+	font-weight: 650;
+}
+
+.markdown-host .milkdown .editor h5,
+.markdown-host .milkdown .editor h6 {
+	font-size: 1em;
+	margin: 0.8em 0 0.35em;
+	font-weight: 650;
+	color: var(--crepe-color-on-surface-variant);
+}
+
+/* 段落与列表 */
+.markdown-host .milkdown .editor p {
+	margin: 0.6em 0;
+}
+
+.markdown-host .milkdown .editor li {
+	margin: 0.25em 0;
+}
+
+/* 行内代码 */
+.markdown-host .milkdown .editor code:not(pre code) {
+	background: var(--crepe-color-inline-area);
+	color: var(--crepe-color-inline-code);
+	padding: 0.15em 0.45em;
+	border-radius: 5px;
+	font-size: 0.88em;
+	font-family: var(--crepe-font-code, monospace);
+}
+
+/* 代码块：圆角 + 边框 + 阴影 */
+.markdown-host .milkdown .editor pre,
+.markdown-host .milkdown .milkdown-code-block {
+	background: var(--crepe-color-surface-low);
+	border: 1px solid var(--crepe-color-outline);
+	border-radius: 10px;
+	padding: 14px 16px;
+	margin: 0.9em 0;
+	overflow-x: auto;
+	font-size: 0.88em;
+	line-height: 1.6;
+}
+
+.markdown-host .milkdown .editor pre code {
+	font-family: var(--crepe-font-code, monospace);
+}
+
+/* 引用 */
+.markdown-host .milkdown .editor blockquote {
+	margin: 0.8em 0;
+	padding: 0.4em 1.1em;
+	border-left: 3px solid var(--crepe-color-primary);
+	background: var(--crepe-color-inline-area);
+	border-radius: 0 8px 8px 0;
+	color: var(--crepe-color-on-surface-variant);
+}
+
+/* 分割线 */
+.markdown-host .milkdown .editor hr {
+	border: none;
+	border-top: 1px solid var(--crepe-color-outline);
+	margin: 1.4em 0;
+}
+
+/* 链接 */
+.markdown-host .milkdown .editor a {
+	color: var(--crepe-color-primary);
+	text-decoration: none;
+}
+
+.markdown-host .milkdown .editor a:hover {
+	text-decoration: underline;
+}
+
+/* 图片：圆角 + 柔和阴影 */
+.markdown-host .milkdown .editor img,
+.markdown-host .milkdown .milkdown-image-block img {
+	border-radius: 10px;
+	box-shadow: var(--crepe-shadow-1, 0 1px 3px rgba(0, 0, 0, 0.15));
+	max-width: 100%;
+}
+
+/* ============ 表格（M7：边框/表头/隔行/hover/圆角） ============ */
+.markdown-host .milkdown .editor table {
+	border-collapse: separate;
+	border-spacing: 0;
+	width: 100%;
+	margin: 1em 0;
+	font-size: 0.92em;
+	line-height: 1.6;
+	border: 1px solid var(--crepe-color-outline);
+	border-radius: 10px;
+	overflow: hidden;
+	background: var(--crepe-color-background);
+}
+
+.markdown-host .milkdown .editor th {
+	background: var(--crepe-color-inline-area);
+	color: var(--crepe-color-on-surface);
+	font-weight: 650;
+	text-align: left;
+	padding: 9px 14px;
+	border-bottom: 1px solid var(--crepe-color-outline);
+	white-space: nowrap;
+}
+
+.markdown-host .milkdown .editor td {
+	padding: 8px 14px;
+	border-bottom: 1px solid var(--crepe-color-outline);
+	vertical-align: top;
+}
+
+.markdown-host .milkdown .editor tbody tr:last-child td {
+	border-bottom: none;
+}
+
+.markdown-host .milkdown .editor tbody tr:nth-child(even) {
+	background: var(--crepe-color-inline-area);
+}
+
+.markdown-host .milkdown .editor tbody tr:hover {
+	background: var(--crepe-color-hover);
+}
+
+/* 表格中的行内代码与链接对齐 */
+.markdown-host .milkdown .editor td code,
+.markdown-host .milkdown .editor th code {
+	font-size: 0.9em;
+}
+
 /* ============ 对话框 ============ */
 .dialog-overlay {
 	position: fixed;
@@ -642,11 +970,13 @@ body {
 .dialog-panel {
 	min-width: 320px;
 	max-width: 480px;
-	padding: 18px;
-	background: var(--surface);
+	padding: 20px;
+	background: var(--glass-bg);
+	-webkit-backdrop-filter: blur(24px) saturate(1.6);
+	backdrop-filter: blur(24px) saturate(1.6);
 	border: 1px solid var(--border);
-	border-radius: 8px;
-	box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+	border-radius: var(--radius-lg);
+	box-shadow: var(--shadow-2), 0 0 0 1px var(--glass-border) inset;
 	display: flex;
 	flex-direction: column;
 	gap: 12px;
@@ -669,16 +999,18 @@ body {
 	width: 100%;
 	padding: 7px 10px;
 	border: 1px solid var(--border);
-	border-radius: 5px;
-	background: var(--bg);
+	border-radius: var(--radius-sm);
+	background: var(--bg-elevated);
 	color: var(--text);
 	font-size: 13px;
 	outline: none;
 	user-select: text;
+	transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
 
 .dialog-input:focus {
 	border-color: var(--accent);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .dialog-buttons {
@@ -690,11 +1022,12 @@ body {
 .dialog-btn {
 	padding: 6px 16px;
 	border: 1px solid var(--border);
-	border-radius: 5px;
+	border-radius: var(--radius-sm);
 	background: var(--bg-secondary);
 	color: var(--text);
 	font-size: 13px;
 	cursor: pointer;
+	transition: background 0.12s ease;
 }
 
 .dialog-btn:hover {

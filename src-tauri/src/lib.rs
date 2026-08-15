@@ -26,6 +26,7 @@ pub fn run() {
             fs::create_file,
             fs::delete_path,
             fs::rename_path,
+            fs::path_is_dir,
             watcher::start_watch,
             watcher::stop_watch,
             novel::scan_chapters,

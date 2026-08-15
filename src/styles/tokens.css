@@ -1,40 +1,62 @@
 /* ============================================================
- * 语义色 token —— 浅色 / 暗色双主题
+ * 语义色 token —— 浅色 / 暗色双主题（macOS 风格，M7）
  * 组件一律引用语义变量，不写死颜色
  * ============================================================ */
 
 :root[data-theme="light"] {
 	color-scheme: light;
-	--bg: #ffffff;
-	--bg-secondary: #f3f3f3;
+	--bg: #f5f5f7; /* mac 系统灰底 */
+	--bg-secondary: #f2f2f7; /* 侧栏灰 */
+	--bg-elevated: #ffffff; /* 浮起面板 */
 	--surface: #ffffff;
-	--border: #e0e0e0;
-	--text: #1f1f1f;
-	--text-muted: #6b6b6b;
-	--accent: #2f6fed;
+	--border: rgba(0, 0, 0, 0.08);
+	--border-strong: rgba(0, 0, 0, 0.14);
+	--text: #1d1d1f;
+	--text-muted: #86868b;
+	--accent: #007aff; /* mac 蓝 */
 	--accent-contrast: #ffffff;
-	--hover: rgba(0, 0, 0, 0.05);
-	--active: rgba(47, 111, 237, 0.12);
-	--code-bg: #f6f6f6;
-	--danger: #d64545;
+	--hover: rgba(0, 0, 0, 0.055);
+	--active: rgba(0, 122, 255, 0.12);
+	--code-bg: #f0f0f3;
+	--danger: #ff3b30;
 	--warning-bg: #fff7e6;
 	--warning-border: #e8c98a;
+	/* macOS 风格补充 token */
+	--titlebar-h: 44px;
+	--radius-sm: 6px;
+	--radius-md: 9px;
+	--radius-lg: 12px;
+	--shadow-1: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.05);
+	--shadow-2: 0 4px 16px rgba(0, 0, 0, 0.12);
+	--glass-bg: rgba(250, 250, 252, 0.82); /* 毛玻璃底 */
+	--glass-border: rgba(255, 255, 255, 0.55);
 }
 
 :root[data-theme="dark"] {
 	color-scheme: dark;
-	--bg: #1e1e1e;
-	--bg-secondary: #252526;
-	--surface: #1e1e1e;
-	--border: #3c3c3c;
-	--text: #d4d4d4;
-	--text-muted: #8a8a8a;
-	--accent: #4d8bff;
+	--bg: #1e1e20;
+	--bg-secondary: #232326;
+	--bg-elevated: #2a2a2e;
+	--surface: #2a2a2e;
+	--border: rgba(255, 255, 255, 0.09);
+	--border-strong: rgba(255, 255, 255, 0.16);
+	--text: #f5f5f7;
+	--text-muted: #98989d;
+	--accent: #0a84ff;
 	--accent-contrast: #ffffff;
-	--hover: rgba(255, 255, 255, 0.06);
-	--active: rgba(77, 139, 255, 0.18);
-	--code-bg: #2d2d2d;
-	--danger: #e06c6c;
+	--hover: rgba(255, 255, 255, 0.07);
+	--active: rgba(10, 132, 255, 0.22);
+	--code-bg: #2d2d31;
+	--danger: #ff453a;
 	--warning-bg: #3a3220;
 	--warning-border: #6b5a33;
+	/* macOS 风格补充 token */
+	--titlebar-h: 44px;
+	--radius-sm: 6px;
+	--radius-md: 9px;
+	--radius-lg: 12px;
+	--shadow-1: 0 1px 3px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.25);
+	--shadow-2: 0 8px 28px rgba(0, 0, 0, 0.45);
+	--glass-bg: rgba(40, 40, 44, 0.8);
+	--glass-border: rgba(255, 255, 255, 0.08);
 }

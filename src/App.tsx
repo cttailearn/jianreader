@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import TopBar from "./components/TopBar";
 import StatusBar from "./components/StatusBar";
 import FileTree from "./components/FileTree";
@@ -8,6 +8,7 @@ import ExternalChangeBar from "./components/ExternalChangeBar";
 import TocPanel from "./components/TocPanel";
 import ChapterPanel from "./components/ChapterPanel";
 import NovelReader from "./components/NovelReader";
+import PanelResizer from "./components/PanelResizer";
 import { useThemeStore } from "./stores/theme";
 import { saveActive, useTabsStore } from "./stores/tabs";
 import { initWatcher } from "./stores/watcher";
@@ -19,6 +20,9 @@ import {
 } from "./stores/session";
 import { isMarkdownPath } from "./utils/mdImage";
 import { useTreeStore } from "./stores/tree";
+import { usePanelsStore } from "./stores/panels";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { invoke } from "@tauri-apps/api/core";
 
 // 编辑器内核懒加载：首屏不打包 CM6，点开文件才加载（design 7.1）
 const EditorHost = lazy(() => import("./editors"));
@@ -35,6 +39,49 @@ export default function App() {
 	const syncContent = useTabsStore((s) => s.syncContent);
 	const activeDoc = tabs.find((t) => t.path === activePath) ?? null;
 	const rootPath = useTreeStore((s) => s.rootPath);
+	const leftW = usePanelsStore((s) => s.leftW);
+	const rightW = usePanelsStore((s) => s.rightW);
+	const [dragOver, setDragOver] = useState(false);
+
+	// 拖入目录/文件打开（M7）：整窗监听 Tauri drag-drop 事件
+	useEffect(() => {
+		let unlisten: (() => void) | undefined;
+		getCurrentWebview()
+			.onDragDropEvent((e) => {
+				const p = e.payload;
+				if (p.type === "over") {
+					setDragOver(true);
+				} else if (p.type === "leave") {
+					setDragOver(false);
+				} else if (p.type === "drop") {
+					setDragOver(false);
+					void handleDropPaths(p.paths);
+				}
+			})
+			.then((u) => {
+				unlisten = u;
+			})
+			.catch((err) => console.warn("drag-drop listen failed:", err));
+		return () => unlisten?.();
+	}, []);
+
+	/** 拖入路径分发：目录 → 打开目录；文件 → 打开标签 */
+	async function handleDropPaths(paths: string[]) {
+		const ts = useTabsStore.getState();
+		const tree = useTreeStore.getState();
+		let rootOpened = false;
+		for (const p of paths) {
+			const isDir = await invoke<boolean>("path_is_dir", { path: p }).catch(() => false);
+			if (isDir) {
+				if (!rootOpened) {
+					rootOpened = true;
+					await tree.openRoot(p).catch(() => {});
+				}
+			} else {
+				await ts.openFile(p).catch(() => {});
+			}
+		}
+	}
 
 	// 会话恢复（M6）：窗口位置 + 上次目录/标签/激活标签
 	useEffect(() => {
@@ -122,13 +169,14 @@ export default function App() {
 		<div className="app">
 			<TopBar />
 			<div className="app-main">
-				<aside className="panel-left">
+				<aside className="panel-left" style={{ width: leftW }}>
 					{activeDoc?.isNovel ? (
 						<ChapterPanel path={activeDoc.path} />
 					) : (
 						<FileTree />
 					)}
 				</aside>
+				<PanelResizer side="left" />
 				<section className="panel-center">
 					<TabBar />
 					<div className="editor-area">
@@ -196,13 +244,21 @@ export default function App() {
 					</div>
 				</section>
 				{activeDoc && !activeDoc.isNovel && isMarkdownPath(activeDoc.path) && (
-					<aside className="panel-right">
-						<TocPanel />
-					</aside>
+					<>
+						<PanelResizer side="right" />
+						<aside className="panel-right" style={{ width: rightW }}>
+							<TocPanel />
+						</aside>
+					</>
 				)}
 			</div>
 			<StatusBar />
 			<DialogModal />
+			{dragOver && (
+				<div className="drop-overlay">
+					<div className="drop-overlay-inner">松开以打开</div>
+				</div>
+			)}
 		</div>
 	);
 }

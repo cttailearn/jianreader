@@ -177,6 +177,14 @@ pub fn write_text_file(
         .map_err(|e| io_err(e, "获取文件信息"))
 }
 
+/// 路径类型判定（拖拽打开分发用）：目录 true / 文件 false；不存在报错
+#[tauri::command]
+pub fn path_is_dir(path: String) -> Result<bool, String> {
+    fs::metadata(&path)
+        .map(|m| m.is_dir())
+        .map_err(|e| io_err(e, "读取路径"))
+}
+
 /// 列举一层目录（懒加载），目录在前按名排序，过滤噪音目录
 #[tauri::command]
 pub fn read_dir_entries(path: String) -> Result<Vec<DirEntryInfo>, String> {

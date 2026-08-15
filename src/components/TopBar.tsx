@@ -1,7 +1,9 @@
-//! 顶栏：目录名 + 打开目录/刷新/新建文件 + 主题切换
+//! 顶栏（macOS 风格，M7）：左侧交通灯（红黄绿）+ 中间拖拽区/标题 + 右侧操作按钮
+//! 窗口为无边框模式（decorations:false），整栏中段可拖拽移动窗口，双击最大化
 
 import { useEffect } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useThemeStore } from "../stores/theme";
 import { useTreeStore } from "../stores/tree";
 import { showDialog } from "../stores/dialog";
@@ -80,42 +82,74 @@ export default function TopBar() {
 		await refreshRoot();
 	};
 
+	const win = () => getCurrentWindow();
+
 	return (
 		<header className="topbar">
-			<span className="topbar-title" title={rootPath ?? "简阅"}>
-				📝 {rootName || "简阅"}
-			</span>
-			{rootPath && (
+			{/* 交通灯：关闭 / 最小化 / 最大化（macOS 惯例） */}
+			<div className="mac-lights">
+				<button
+					className="mac-light mac-light-close"
+					title="关闭"
+					onClick={() => void win().close()}
+				>
+					<span>×</span>
+				</button>
+				<button
+					className="mac-light mac-light-min"
+					title="最小化"
+					onClick={() => void win().minimize()}
+				>
+					<span>−</span>
+				</button>
+				<button
+					className="mac-light mac-light-max"
+					title="最大化 / 还原"
+					onClick={() => void win().toggleMaximize()}
+				>
+					<span>＋</span>
+				</button>
+			</div>
+			{/* 标题 + 拖拽区 */}
+			<div className="topbar-center" data-tauri-drag-region>
+				<span className="topbar-title" title={rootPath ?? "简阅"}>
+					{rootName || "简阅"}
+				</span>
+			</div>
+			{/* 操作按钮 */}
+			<div className="topbar-actions">
+				{rootPath && (
+					<button
+						className="icon-btn"
+						onClick={() => void newFile()}
+						title="新建文件"
+					>
+						＋
+					</button>
+				)}
 				<button
 					className="icon-btn"
-					onClick={() => void newFile()}
-					title="新建文件"
+					onClick={() => void refreshRoot()}
+					title="刷新目录"
+					disabled={!rootPath}
 				>
-					＋
+					🔄
 				</button>
-			)}
-			<button
-				className="icon-btn"
-				onClick={() => void refreshRoot()}
-				title="刷新目录"
-				disabled={!rootPath}
-			>
-				🔄
-			</button>
-			<button
-				className="icon-btn"
-				onClick={pickFolder}
-				title="打开文件夹 (Ctrl+O)"
-			>
-				📂
-			</button>
-			<button
-				className="icon-btn"
-				onClick={toggle}
-				title={`切换主题（当前${mode === "light" ? "浅色" : "暗色"}）Ctrl+Shift+T`}
-			>
-				{mode === "light" ? "🌙" : "☀️"}
-			</button>
+				<button
+					className="icon-btn"
+					onClick={pickFolder}
+					title="打开文件夹 (Ctrl+O)"
+				>
+					📂
+				</button>
+				<button
+					className="icon-btn"
+					onClick={toggle}
+					title={`切换主题（当前${mode === "light" ? "浅色" : "暗色"}）Ctrl+Shift+T`}
+				>
+					{mode === "light" ? "🌙" : "☀️"}
+				</button>
+			</div>
 		</header>
 	);
 }

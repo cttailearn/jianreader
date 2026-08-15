@@ -6,6 +6,8 @@
 
 import { useEffect, useRef } from "react";
 import { Crepe } from "@milkdown/crepe";
+// 组件样式（表格/标题/列表/代码块等全部组件）：主题 css 只含颜色变量，组件样式必须另引
+import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/nord.css";
 import "@milkdown/crepe/theme/frame.css";
 import "katex/dist/katex.min.css";
