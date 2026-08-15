@@ -1,0 +1,25 @@
+简阅 绿色版使用说明
+====================
+
+运行环境
+--------
+* Windows 10 1809+ / Windows 11
+* 需要 Microsoft Edge WebView2 Runtime（Win10/11 一般已自带；缺失时程序会弹窗提示，
+  也可手动安装：https://developer.microsoft.com/microsoft-edge/webview2/）
+
+使用方法
+--------
+解压后直接双击「简阅.exe」即可运行，无需安装，可拷贝到 U 盘随身携带。
+
+常见问题
+--------
+* 双击后无反应或闪退：
+  1. 删除运行数据目录后重试：%LOCALAPPDATA%\com.jianreader.app\EBWebView
+  2. 若仍有问题，请把 %LOCALAPPDATA%\com.jianreader.app\jianyue-crash.log
+     反馈给开发者（该日志记录程序内部错误原因）。
+* 打开文件后字体/排版异常：属 WebView2 缓存问题，同上删除 EBWebView 目录。
+
+数据位置
+--------
+* 阅读设置、书签、会话恢复：%LOCALAPPDATA%\com.jianreader.app\EBWebView\Default\Local Storage
+（绿色版与安装版共用数据目录，重装不影响已存数据）

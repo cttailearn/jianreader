@@ -425,6 +425,8 @@ ready/dirty ─磁盘上被删除→ deleted（标签灰化 + 提示，保存时
 | **M5 小说模式** ✅ 已完成 | 章节解析 + 阅读视图 + 阅读设置 + 章内直接编辑 + 查找替换 + 书签续读 | 50MB 小说 1s 内打开（实测扫描 20ms），目录跳转、设置生效、编辑保存回写（UTF-8/GBK fixture 往返测试通过） |
 | **M6 打磨打包** ✅ 已完成 | 大文件保护（>5MB 只读）、会话恢复（目录/标签/窗口）、只读文件处理（磁盘属性🔒）、打包配置（移除 CDP 参数、nsis 简体中文） | 安装包 `简阅_0.1.0_x64-setup.exe`（3.8MB）+ 绿色版 `release/简阅-绿色版-*.zip`（4.6MB）已产出，release exe 冒烟启动通过 |
 
+> ⚠️ 修复记录（2026-08-15）：release 版闪退根因 = `[profile.release] strip = true` 剥离 WebView2Loader 静态链接所需符号，release 启动即 panic（dev 正常）。已移除 strip 并加入 panic 诊断（stderr + crash.log + 弹窗）。另注意：强杀应用进程会污染 WebView2 user data（`%LOCALAPPDATA%\com.jianreader.app\EBWebView`），下次启动可能挂起无窗口，删除该目录即可恢复。
+
 > ⚠️ M6 打包前待办：`additionalBrowserArgs`（dev CDP 端口）已从 `tauri.conf.json` 移除（release 不再暴露远程调试端口）；`main.tsx` 的 `__stores` 开发钩子受 `import.meta.env.DEV` 门控，release 构建时被 Vite 死代码消除，不进入产物，予以保留。Tauri 2 无 zip target，绿色版由 `scripts/package-portable.ps1` 压缩单 exe 生成。
 
 ---

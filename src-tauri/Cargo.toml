@@ -33,4 +33,6 @@ opt-level = 1
 [profile.release]
 lto = true
 codegen-units = 1
-strip = true
+# 注意：不能 strip = true —— Windows 上会剥离 WebView2Loader 静态链接所需符号，
+# 导致 release 版启动即 panic（dev/debug 正常、release 闪退的根因）
+# 体积控制靠 lto + codegen-units=1 已足够（10.9MB exe）
