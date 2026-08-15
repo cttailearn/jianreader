@@ -187,10 +187,11 @@ body {
 }
 
 .mac-light span {
-	opacity: 0;
+	/* M8：符号常显（不再悬停才出现），保证按钮可识别 */
+	opacity: 0.8;
 	font-size: 10px;
 	line-height: 1;
-	color: rgba(0, 0, 0, 0.55);
+	color: rgba(0, 0, 0, 0.6);
 	font-weight: 700;
 	transition: opacity 0.15s ease;
 }
@@ -244,6 +245,46 @@ body {
 	align-items: center;
 	gap: 4px;
 	flex-shrink: 0;
+}
+
+/* 显式窗口控制按钮（M8：最小化/最大化/关闭，随时可见） */
+.window-actions {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+}
+
+.win-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 30px;
+	height: 26px;
+	border: none;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--text);
+	font-size: 13px;
+	line-height: 1;
+	cursor: pointer;
+	transition: background 0.12s ease, color 0.12s ease;
+}
+
+.win-btn:hover {
+	background: var(--hover);
+	color: var(--text);
+}
+
+.win-btn-close:hover {
+	background: var(--danger);
+	color: #fff;
+}
+
+.topbar-actions-sep {
+	width: 1px;
+	height: 18px;
+	background: var(--border);
+	margin: 0 4px;
 }
 
 /* ============ 通用小按钮 ============ */

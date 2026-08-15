@@ -130,6 +130,31 @@ export default function TopBar() {
 			</div>
 			{/* 操作按钮 */}
 			<div className="topbar-actions">
+				{/* 显式窗口控制（M8：最小化/最大化/关闭，随时可见可点） */}
+				<div className="window-actions">
+					<button
+						className="win-btn"
+						title="最小化"
+						onClick={() => void win().minimize()}
+					>
+						─
+					</button>
+					<button
+						className="win-btn"
+						title="最大化 / 还原"
+						onClick={() => void win().toggleMaximize()}
+					>
+						□
+					</button>
+					<button
+						className="win-btn win-btn-close"
+						title="关闭 (Ctrl+W)"
+						onClick={() => void win().close()}
+					>
+						✕
+					</button>
+				</div>
+				<span className="topbar-actions-sep" />
 				{rootPath && (
 					<button
 						className="icon-btn"
