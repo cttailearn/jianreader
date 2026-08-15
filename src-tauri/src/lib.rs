@@ -5,6 +5,7 @@
 //! M3：watcher（目录监听，notify → fs-event 推送）。
 
 mod fs;
+mod novel;
 mod watcher;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -22,6 +23,9 @@ pub fn run() {
             fs::rename_path,
             watcher::start_watch,
             watcher::stop_watch,
+            novel::scan_chapters,
+            novel::read_chapter,
+            novel::write_chapter,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

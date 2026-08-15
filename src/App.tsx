@@ -6,6 +6,8 @@ import TabBar from "./components/TabBar";
 import DialogModal from "./components/DialogModal";
 import ExternalChangeBar from "./components/ExternalChangeBar";
 import TocPanel from "./components/TocPanel";
+import ChapterPanel from "./components/ChapterPanel";
+import NovelReader from "./components/NovelReader";
 import { useThemeStore } from "./stores/theme";
 import { saveActive, useTabsStore } from "./stores/tabs";
 import { initWatcher } from "./stores/watcher";
@@ -61,7 +63,11 @@ export default function App() {
 			<TopBar />
 			<div className="app-main">
 				<aside className="panel-left">
-					<FileTree />
+					{activeDoc?.isNovel ? (
+						<ChapterPanel path={activeDoc.path} />
+					) : (
+						<FileTree />
+					)}
 				</aside>
 				<section className="panel-center">
 					<TabBar />
@@ -83,14 +89,18 @@ export default function App() {
 									<div className="hint">
 										该文件在磁盘上已不存在。
 										<br />
-										<kbd>Ctrl+S</kbd> 可在原位置重建文件
+										{!activeDoc.isNovel && (
+											<>
+												<kbd>Ctrl+S</kbd> 可在原位置重建文件
+											</>
+										)}
 									</div>
 								</div>
+							) : activeDoc.isNovel ? (
+								<NovelReader key={activeDoc.path} path={activeDoc.path} />
 							) : (
 								<Suspense
-									fallback={
-										<div className="editor-loading">⏳ 正在加载编辑器…</div>
-									}
+									fallback={<div className="editor-loading">⏳ 正在加载编辑器…</div>}
 								>
 									<EditorHost
 										key={`${activeDoc.path}:${activeDoc.rev}:${activeDoc.mdView}`}
@@ -112,14 +122,14 @@ export default function App() {
 								<div className="hint">
 									轻量 · 快速 · 目录实时同步 · Markdown 所见即所得 · 小说阅读
 									<br />
-									<kbd>Ctrl+O</kbd> 打开目录 &nbsp; <kbd>Ctrl+S</kbd> 保存
-									&nbsp; <kbd>Ctrl+W</kbd> 关闭标签
+									<kbd>Ctrl+O</kbd> 打开目录 &nbsp; <kbd>Ctrl+S</kbd> 保存 &nbsp;{" "}
+									<kbd>Ctrl+W</kbd> 关闭标签
 								</div>
 							</div>
 						)}
 					</div>
 				</section>
-				{activeDoc && isMarkdownPath(activeDoc.path) && (
+				{activeDoc && !activeDoc.isNovel && isMarkdownPath(activeDoc.path) && (
 					<aside className="panel-right">
 						<TocPanel />
 					</aside>

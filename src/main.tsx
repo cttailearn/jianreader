@@ -5,6 +5,7 @@ import "./styles/global.css";
 import { useTabsStore } from "./stores/tabs";
 import { useTreeStore } from "./stores/tree";
 import { useMdStore } from "./stores/md";
+import { useNovelStore } from "./stores/novel";
 
 // 开发/验收钩子：CDP 端到端测试可直接驱动 store（绕过原生对话框）
 if (import.meta.env.DEV) {
@@ -12,6 +13,7 @@ if (import.meta.env.DEV) {
 		tabs: useTabsStore,
 		tree: useTreeStore,
 		md: useMdStore,
+		novel: useNovelStore,
 	};
 }
 

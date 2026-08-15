@@ -101,8 +101,8 @@ fn encode_text(text: &str, encoding: &str, has_bom: bool) -> Result<Vec<u8>, Str
     }
 }
 
-/// 按目标 EOL 规范化换行符（编辑器内部统一 LF，保存时还原）
-fn normalize_eol(text: &str, eol: &str) -> String {
+/// 按目标 EOL 规范化换行符（编辑器内部统一 LF，保存时还原；novel.rs 写回也复用）
+pub fn normalize_eol(text: &str, eol: &str) -> String {
     if eol != "\r\n" {
         return text.to_owned();
     }

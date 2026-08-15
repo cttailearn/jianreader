@@ -31,6 +31,8 @@ export interface TabDoc {
 	rev: number;
 	/** MD 视图模式：所见即所得 / 源码 */
 	mdView: "wysiwyg" | "source";
+	/** 小说模式标签：正文按章懒加载，不走全文 content */
+	isNovel: boolean;
 	lastError?: string;
 }
 
@@ -90,6 +92,12 @@ interface TabsState {
 	renameTab: (fromPath: string, toPath: string) => void;
 	/** MD 视图模式切换（wysiwyg ↔ source） */
 	toggleMdView: (path: string) => void;
+	/** 小说标签脏状态同步（novel store 的 dirtySet → 标签状态） */
+	setNovelDirty: (path: string, dirty: boolean) => void;
+	/** 手动进入小说模式（txt 未自动命中时；force 扫描 ≥1 章即进入） */
+	enterNovelMode: (path: string) => Promise<boolean>;
+	/** 退出小说模式：整读全文，转普通编辑标签 */
+	exitNovelMode: (path: string) => Promise<void>;
 }
 
 export const useTabsStore = create<TabsState>((set, get) => ({
@@ -107,6 +115,7 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 			path,
 			name: basename(path),
 			mdView: "wysiwyg",
+			isNovel: false,
 			content: "",
 			encoding: "UTF-8",
 			hasBom: false,
@@ -117,6 +126,26 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 			rev: 0,
 		};
 		set((s) => ({ tabs: [...s.tabs, doc], activePath: path }));
+		// txt → 尝试小说模式（章节扫描 ≥3 章自动进入，零打断）
+		if (/\.txt$/i.test(path)) {
+			const { useNovelStore } = await import("./novel");
+			const isNovel = await useNovelStore.getState().loadBook(path);
+			if (isNovel) {
+				set((s) => ({
+					tabs: s.tabs.map((t) =>
+						t.path === path
+							? {
+									...t,
+									isNovel: true,
+									status: "ready",
+									languageName: "小说",
+								}
+							: t,
+					),
+				}));
+				return;
+			}
+		}
 		try {
 			const p = await invoke<FilePayload>("read_text_file", { path });
 			set((s) => ({
@@ -153,6 +182,12 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 				if (!ok) return false;
 			}
 		}
+		// 小说标签：关闭前记录续读位置
+		if (doc.isNovel) {
+			const { useNovelStore } = await import("./novel");
+			const b = useNovelStore.getState().books.get(path);
+			if (b) useNovelStore.getState().markReading(path, b.chapterIdx);
+		}
 		set((s) => {
 			const tabs = s.tabs.filter((t) => t.path !== path);
 			let activePath = s.activePath;
@@ -186,6 +221,13 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 	save: async (path) => {
 		const doc = get().tabs.find((t) => t.path === path);
 		if (!doc || doc.status === "saving") return false;
+		// 小说标签：按章写回（write_chapter + 重解析章节表）
+		if (doc.isNovel) {
+			const { useNovelStore } = await import("./novel");
+			const ok = await useNovelStore.getState().saveChapter(path);
+			if (ok) get().setNovelDirty(path, false);
+			return ok;
+		}
 		set((s) => ({
 			tabs: s.tabs.map((t) =>
 				t.path === path ? { ...t, status: "saving" as DocStatus } : t,
@@ -218,8 +260,7 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 					t.path === path
 						? {
 								...t,
-								status:
-									t.status === "deleted" ? "deleted" : ("dirty" as DocStatus),
+								status: t.status === "deleted" ? "deleted" : ("dirty" as DocStatus),
 								lastError: String(e),
 							}
 						: t,
@@ -245,6 +286,14 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 	},
 
 	reload: async (path) => {
+		const doc = get().tabs.find((t) => t.path === path);
+		// 小说标签：重扫章节表 + 重读当前章（不走全文 content）
+		if (doc?.isNovel) {
+			const { useNovelStore } = await import("./novel");
+			await useNovelStore.getState().reloadBook(path);
+			get().setNovelDirty(path, false);
+			return;
+		}
 		try {
 			const p = await invoke<FilePayload>("read_text_file", { path });
 			set((s) => ({
@@ -282,15 +331,21 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 			),
 		})),
 
-	renameTab: (fromPath, toPath) =>
+	renameTab: (fromPath, toPath) => {
+		const wasNovel = get().tabs.find((t) => t.path === fromPath)?.isNovel;
 		set((s) => ({
 			tabs: s.tabs.map((t) =>
-				t.path === fromPath
-					? { ...t, path: toPath, name: basename(toPath) }
-					: t,
+				t.path === fromPath ? { ...t, path: toPath, name: basename(toPath) } : t,
 			),
 			activePath: s.activePath === fromPath ? toPath : s.activePath,
-		})),
+		}));
+		// 小说标签：book 状态按新路径迁移（章节表/设置/书签键一致）
+		if (wasNovel) {
+			void import("./novel").then(({ useNovelStore }) =>
+				useNovelStore.getState().moveBook(fromPath, toPath),
+			);
+		}
+	},
 
 	toggleMdView: (path) =>
 		set((s) => ({
@@ -299,13 +354,85 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 					? {
 							...t,
 							mdView:
-								t.mdView === "wysiwyg"
-									? ("source" as const)
-									: ("wysiwyg" as const),
+								t.mdView === "wysiwyg" ? ("source" as const) : ("wysiwyg" as const),
 						}
 					: t,
 			),
 		})),
+
+	setNovelDirty: (path, dirty) =>
+		set((s) => ({
+			tabs: s.tabs.map((t) =>
+				t.path === path
+					? {
+							...t,
+							status: dirty
+								? t.status === "dirty" || t.status === "external-changed"
+									? t.status
+									: ("dirty" as DocStatus)
+								: ("ready" as DocStatus),
+						}
+					: t,
+			),
+		})),
+
+	enterNovelMode: async (path) => {
+		const doc = get().tabs.find((t) => t.path === path);
+		if (!doc) return false;
+		// 有未保存修改时先确认（阅读模式从磁盘读章，不带入内存内容）
+		if (doc.status === "dirty" || doc.status === "external-changed") {
+			const { showDialog } = await import("./dialog");
+			const r = await showDialog({
+				title: "未保存的更改",
+				message: "进入阅读模式前需先处理「" + doc.name + "」的未保存修改。",
+				buttons: [
+					{ id: "save", label: "保存并进入", danger: false },
+					{ id: "discard", label: "放弃修改", danger: true },
+					{ id: "cancel", label: "取消", danger: false },
+				],
+			});
+			if (r.button === "cancel") return false;
+			if (r.button === "save") {
+				const ok = await get().save(path);
+				if (!ok) return false;
+			}
+		}
+		const { useNovelStore } = await import("./novel");
+		const ok = await useNovelStore.getState().loadBook(path, true);
+		if (!ok) return false;
+		set((s) => ({
+			tabs: s.tabs.map((t) =>
+				t.path === path
+					? { ...t, isNovel: true, status: "ready", languageName: "小说" }
+					: t,
+			),
+		}));
+		return true;
+	},
+
+	exitNovelMode: async (path) => {
+		set((s) => ({
+			tabs: s.tabs.map((t) =>
+				t.path === path
+					? { ...t, isNovel: false, status: "loading" as DocStatus, rev: t.rev + 1 }
+					: t,
+			),
+		}));
+		const { useNovelStore } = await import("./novel");
+		useNovelStore.getState().unloadBook(path);
+		try {
+			const p = await invoke<FilePayload>("read_text_file", { path });
+			set((s) => ({
+				tabs: s.tabs.map((t) => (t.path === path ? payloadToDoc(t, p) : t)),
+			}));
+		} catch (e) {
+			set((s) => ({
+				tabs: s.tabs.map((t) =>
+					t.path === path ? { ...t, status: "error", lastError: String(e) } : t,
+				),
+			}));
+		}
+	},
 }));
 
 /** 主动保存当前激活文档（供全局 Ctrl+S） */
