@@ -17,6 +17,10 @@
   1. 删除运行数据目录后重试：%LOCALAPPDATA%\com.jianreader.app\EBWebView
   2. 若仍有问题，请把 %LOCALAPPDATA%\com.jianreader.app\jianyue-crash.log
      反馈给开发者（该日志记录程序内部错误原因）。
+* 首次启动窗口出现较慢（十几秒到 1-2 分钟）：
+  无外网环境下 WebView2 首次初始化需要等待，属正常现象；
+  启动后请耐心等待窗口出现，不要反复双击（多实例会互相抢数据反而更慢）。
+  之后再次启动会明显加快。
 * 打开文件后字体/排版异常：属 WebView2 缓存问题，同上删除 EBWebView 目录。
 
 数据位置
