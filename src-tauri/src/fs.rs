@@ -185,6 +185,13 @@ pub fn path_is_dir(path: String) -> Result<bool, String> {
         .map_err(|e| io_err(e, "读取路径"))
 }
 
+/// 文件元信息（图片查看/大文件标签用）：大小 + 只读属性
+#[tauri::command]
+pub fn file_meta(path: String) -> Result<(u64, bool), String> {
+    let meta = fs::metadata(&path).map_err(|e| io_err(e, "读取文件信息"))?;
+    Ok((meta.len(), meta.permissions().readonly()))
+}
+
 /// 列举一层目录（懒加载），目录在前按名排序，过滤噪音目录
 #[tauri::command]
 pub fn read_dir_entries(path: String) -> Result<Vec<DirEntryInfo>, String> {

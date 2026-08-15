@@ -97,6 +97,13 @@ export default function FileTree() {
 				if (node.isDir) void toggleExpand(node.path);
 				else void openFile(node.path);
 				break;
+			case "reader":
+				// 阅读模式打开（无章节标题的 txt 也以整本单章打开）
+				if (!node.isDir) {
+					const ts = useTabsStore.getState();
+					await ts.openInReader(node.path);
+				}
+				break;
 			case "newfile":
 			case "newdir": {
 				const isDir = action === "newdir";
@@ -180,6 +187,7 @@ export default function FileTree() {
 	};
 
 	const isDirRow = menu?.node.isDir ?? false;
+	const isTxtFile = !menu?.node.isDir && /\.txt$/i.test(menu?.node.path ?? "");
 	const menuItems: {
 		id: string;
 		label: string;
@@ -187,6 +195,9 @@ export default function FileTree() {
 		sep?: boolean;
 	}[] = [
 		{ id: "open", label: "打开" },
+		...(isTxtFile
+			? [{ id: "reader", label: "以阅读模式打开", sep: true }]
+			: []),
 		{ id: "newfile", label: "新建文件" },
 		{ id: "newdir", label: "新建文件夹" },
 		{ id: "rename", label: "重命名" },

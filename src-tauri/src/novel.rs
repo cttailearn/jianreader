@@ -125,9 +125,10 @@ fn match_heading(line: &str) -> Option<u8> {
     }
 
     // 特殊章（独立短词；整行 ≤10 字且词后只能跟分隔符，避免“正文……”类散文误判）
-    const SPECIALS: [&str; 14] = [
-        "序章", "楔子", "引子", "前言", "序言", "尾声", "后记", "终章", "番外", "外传", "附录",
-        "结局", "正文", "卷首语",
+    // 注意：长的在前（番外篇 先于 番外），避免前缀截断
+    const SPECIALS: [&str; 16] = [
+        "番外篇", "大结局", "卷首语", "序章", "楔子", "引子", "前言", "序言", "尾声", "后记",
+        "终章", "番外", "外传", "附录", "结局", "正文",
     ];
     if t.chars().count() <= 10 {
         for s in SPECIALS {
@@ -141,6 +142,61 @@ fn match_heading(line: &str) -> Option<u8> {
                 {
                     return Some(2);
                 }
+            }
+        }
+    }
+
+    // 无"第"的卷：上卷/中卷/下卷/外卷（独立或后跟标题）
+    const VOLUMES: [&str; 6] = ["上卷", "中卷", "下卷", "外卷", "前卷", "后卷"];
+    for s in VOLUMES {
+        if t == s {
+            return Some(1);
+        }
+        if let Some(rest) = t.strip_prefix(s) {
+            let first = rest.chars().next().unwrap_or('\0');
+            if matches!(first, ' ' | '　' | '：' | ':' | '－' | '-' | '（' | '(' | '·' | '、') {
+                return Some(1);
+            }
+        }
+    }
+
+    // 括号编号：（一）（1）【一】【1】(一)(1)[一][1]，后跟任意标题文字（短行已保证）
+    for (open, close) in [('（', '）'), ('(', ')'), ('【', '】'), ('[', ']')] {
+        if let Some(rest) = t.strip_prefix(open) {
+            let mut it = rest.chars().peekable();
+            let mut n = 0usize;
+            while let Some(&c) = it.peek() {
+                if is_chinese_num(c) || c.is_ascii_digit() {
+                    n += 1;
+                    it.next();
+                } else {
+                    break;
+                }
+            }
+            if (1..=4).contains(&n) && it.peek() == Some(&close) {
+                return Some(2);
+            }
+        }
+    }
+
+    // 中文数字 + 顿号/句点/空格：一、标题 / 二．标题 / 三. 标题 / 十二 标题
+    {
+        let mut it = t.chars().peekable();
+        let mut cn = 0usize;
+        while let Some(&c) = it.peek() {
+            if is_chinese_num(c) {
+                cn += 1;
+                it.next();
+            } else {
+                break;
+            }
+        }
+        if (1..=3).contains(&cn) {
+            match it.peek() {
+                Some('、') | Some('．') | Some('，') | Some('.') | Some(' ') | Some('　') => {
+                    return Some(2);
+                }
+                _ => {}
             }
         }
     }
@@ -164,8 +220,12 @@ fn match_heading(line: &str) -> Option<u8> {
         }
     }
 
-    // 英文：Chapter 12 / Part II / Episode 5 / Book 3
+    // 英文：Chapter 12 / Part II / Episode 5 / Book 3 / Chapter One
     let upper = t.to_ascii_lowercase();
+    const WORD_NUMS: [&str; 12] = [
+        "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+        "twenty", "thirty",
+    ];
     for prefix in ["chapter", "part", "episode", "book"] {
         if let Some(rest) = upper.strip_prefix(prefix) {
             let mut it = rest.chars().peekable();
@@ -189,6 +249,12 @@ fn match_heading(line: &str) -> Option<u8> {
                 }
             }
             if n > 0 {
+                return Some(2);
+            }
+            // 单词数字：Chapter One / Part Two
+            let word: String = it.clone().take(6).collect();
+            let lower = word.trim();
+            if WORD_NUMS.iter().any(|w| lower == *w || lower.starts_with(w)) {
                 return Some(2);
             }
         }
@@ -337,14 +403,68 @@ fn scan_utf16_str(text: &str, encoding: &str, has_bom: bool) -> ScanOut {
     }
 }
 
-/// 按章节懒加载：读 [start, end) 字节范围并解码
+/// 把读取块末尾截断到字符边界（分页懒加载拼接时不产生乱码）
+/// UTF-8：末尾若为多字节序列的一部分则截掉；GBK/Big5：末尾若为双字节前导字节则截掉
+fn trim_trailing_partial_char(buf: &[u8], encoding: &str) -> usize {
+    if buf.is_empty() {
+        return 0;
+    }
+    if encoding.starts_with("UTF-8") {
+        let mut i = buf.len();
+        while i > 0 && (buf[i - 1] & 0xC0) == 0x80 {
+            i -= 1; // 回退到字符起始
+        }
+        if i == 0 {
+            return 0;
+        }
+        let lead = buf[i - 1];
+        let char_len = if lead < 0x80 {
+            1
+        } else if (lead & 0xE0) == 0xC0 {
+            2
+        } else if (lead & 0xF0) == 0xE0 {
+            3
+        } else {
+            4
+        };
+        if buf.len() - (i - 1) < char_len {
+            i - 1 // 字符被切断 → 去掉不完整部分
+        } else {
+            buf.len()
+        }
+    } else if encoding.starts_with("UTF-16") {
+        buf.len() - (buf.len() % 2)
+    } else {
+        // GBK/Big5 等：前导/续字节范围重叠，无法按字节判定边界。
+        // 直接用解码结果回退：末尾若为截断产生的替换字符（U+FFFD），回退 1 字节重试（双字节编码最多回退 1）。
+        let enc = encoding_rs::Encoding::for_label(encoding.as_bytes())
+            .unwrap_or(encoding_rs::UTF_8);
+        let mut len = buf.len();
+        for _ in 0..2 {
+            if len == 0 {
+                break;
+            }
+            let (s, _, had_errors) = enc.decode(&buf[..len]);
+            if !had_errors || !s.ends_with('\u{FFFD}') {
+                return len;
+            }
+            len -= 1;
+        }
+        len
+    }
+}
+
+/// 按章节懒加载：读 [start, end) 字节范围并解码（自动对齐字符边界）
 #[tauri::command]
 pub fn read_chapter(path: String, start: u64, end: u64, encoding: String) -> Result<String, String> {
     let mut f = fs::File::open(&path).map_err(|e| io_err(e, "打开文件"))?;
     let len = (end.saturating_sub(start)) as usize;
     let mut buf = vec![0u8; len];
     f.seek(SeekFrom::Start(start)).map_err(|e| io_err(e, "定位章节"))?;
-    f.read_exact(&mut buf).map_err(|e| io_err(e, "读取章节"))?;
+    let read = f.read(&mut buf).map_err(|e| io_err(e, "读取章节"))?;
+    buf.truncate(read);
+    let keep = trim_trailing_partial_char(&buf, &encoding);
+    buf.truncate(keep);
     let enc = encoding_rs::Encoding::for_label(encoding.as_bytes())
         .unwrap_or(encoding_rs::UTF_8);
     let (s, _, _) = enc.decode(&buf);
@@ -488,6 +608,104 @@ mod tests {
         assert_eq!(ch.len(), 3);
         assert_eq!(ch[0].0, "第一章");
         assert_eq!(ch[1].2, ch[0].3); // end 衔接（\r\n 两字节偏移正确）
+    }
+
+    #[test]
+    fn paren_numbers() {
+        // 括号编号（网文常见）：全角/半角/方头括号
+        let s = "（一）初入江湖\n内容\n(2) 遇险\n内容\n【三】拜师\n内容\n[4] 下山\n内容\n（五）终章\n";
+        let ch = scan(s);
+        assert_eq!(ch.len(), 5);
+        assert_eq!(ch[0].0, "（一）初入江湖");
+        assert_eq!(ch[1].0, "(2) 遇险");
+        assert_eq!(ch[2].0, "【三】拜师");
+        assert_eq!(ch[3].0, "[4] 下山");
+        assert_eq!(ch[4].0, "（五）终章");
+    }
+
+    #[test]
+    fn chinese_num_list() {
+        let s = "一、相遇\n内容\n二、相知\n内容\n三. 相守\n内容\n";
+        let ch = scan(s);
+        assert_eq!(ch.len(), 3);
+        assert_eq!(ch[0].0, "一、相遇");
+        assert_eq!(ch[1].0, "二、相知");
+        assert_eq!(ch[2].0, "三. 相守");
+    }
+
+    #[test]
+    fn volumes_without_di() {
+        let s = "上卷 风起\n第一章 开始\n中卷\n下卷 归途\n";
+        let ch = scan(s);
+        assert_eq!(ch.len(), 4);
+        assert_eq!(ch[0].0, "上卷 风起");
+        assert_eq!(ch[0].1, 1);
+        assert_eq!(ch[1].0, "第一章 开始");
+        assert_eq!(ch[1].1, 2);
+        assert_eq!(ch[2].0, "中卷");
+        assert_eq!(ch[3].0, "下卷 归途");
+    }
+
+    #[test]
+    fn specials_extended() {
+        let s = "番外篇\n番外 双人游\n大结局\n";
+        let ch = scan(s);
+        assert_eq!(ch.len(), 3);
+        assert_eq!(ch[0].0, "番外篇");
+        assert_eq!(ch[1].0, "番外 双人游");
+        assert_eq!(ch[2].0, "大结局");
+    }
+
+    #[test]
+    fn english_word_numbers() {
+        let s = "Chapter One\nstory\nChapter Two\nstory\nPart Three\n";
+        let ch = scan(s);
+        assert_eq!(ch.len(), 3);
+        assert_eq!(ch[0].0, "Chapter One");
+        assert_eq!(ch[2].0, "Part Three");
+    }
+
+    #[test]
+    fn prose_no_false_positive_extended() {
+        // 散文行不应误判（含"（一）"开头的中文段落长度受限，但句子中含编号不误判）
+        let s = "我们谈到（一）个话题，聊了很久。\n他说（2）年前的事，我记不清了。\n";
+        let ch = scan(s);
+        assert_eq!(ch.len(), 0);
+        // "（一）"单独成行且超短才算；长行即使以"一、"开头也不判
+        let s2 = "一、这是一段很长很长的正文叙述内容，超过了三十个字的限制所以不会被认为是章节标题。\n";
+        let ch2 = scan(s2);
+        assert_eq!(ch2.len(), 0);
+    }
+
+    /// 分页边界对齐：UTF-8 多字节字符被切段时不产生乱码
+    #[test]
+    fn trim_partial_utf8() {
+        let text = "第一章 测试\n这是正文内容，包含中文。\n第二章\n";
+        let bytes = text.as_bytes();
+        // 在任意位置切断（含多字节字符中间）→ 前段截到边界，后段从边界续接，拼接还原原文
+        for cut in 0..bytes.len() {
+            let keep = trim_trailing_partial_char(&bytes[..cut], "UTF-8");
+            let s = String::from_utf8_lossy(&bytes[..keep]);
+            let rem = trim_trailing_partial_char(&bytes[keep..], "UTF-8");
+            let s2 = String::from_utf8_lossy(&bytes[keep..keep + rem]);
+            let joined = format!("{s}{s2}");
+            assert!(!joined.contains('\u{FFFD}'), "cut={cut} 拼接有替换字符: {joined}");
+            assert_eq!(joined, text, "cut={cut} 拼接不一致");
+        }
+    }
+
+    #[test]
+    fn trim_partial_gbk() {
+        let (enc, _, _) = encoding_rs::GBK.encode("第一章 测试\n这是正文内容。\n");
+        for cut in 0..enc.len() {
+            let keep = trim_trailing_partial_char(&enc[..cut], "GBK");
+            let s = encoding_rs::GBK.decode(&enc[..keep]).0;
+            let rem = trim_trailing_partial_char(&enc[keep..], "GBK");
+            let s2 = encoding_rs::GBK.decode(&enc[keep..keep + rem]).0;
+            let joined = format!("{s}{s2}");
+            assert!(!joined.contains('\u{FFFD}'), "cut={cut} 拼接有替换字符");
+            assert_eq!(joined, "第一章 测试\n这是正文内容。\n", "cut={cut} 拼接不一致");
+        }
     }
 
     /// 集成测试：UTF-8 fixture 全链路（扫描 → 按章读 → 写回 → 重扫）

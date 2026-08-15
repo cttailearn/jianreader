@@ -8,6 +8,7 @@ import ExternalChangeBar from "./components/ExternalChangeBar";
 import TocPanel from "./components/TocPanel";
 import ChapterPanel from "./components/ChapterPanel";
 import NovelReader from "./components/NovelReader";
+import ImageViewer from "./components/ImageViewer";
 import PanelResizer from "./components/PanelResizer";
 import { useThemeStore } from "./stores/theme";
 import { saveActive, useTabsStore } from "./stores/tabs";
@@ -43,6 +44,12 @@ export default function App() {
 	const rightW = usePanelsStore((s) => s.rightW);
 	const [dragOver, setDragOver] = useState(false);
 
+	// 启动参数 ?root=...（M7 多窗口：新窗口加载指定目录，跳过会话恢复）
+	const rootParam = (() => {
+		const v = new URLSearchParams(window.location.search).get("root");
+		return v ? decodeURIComponent(v) : null;
+	})();
+
 	// 拖入目录/文件打开（M7）：整窗监听 Tauri drag-drop 事件
 	useEffect(() => {
 		let unlisten: (() => void) | undefined;
@@ -65,29 +72,59 @@ export default function App() {
 		return () => unlisten?.();
 	}, []);
 
-	/** 拖入路径分发：目录 → 打开目录；文件 → 打开标签 */
+	/** 拖入路径分发：目录 → 新开窗口/打开工作区；文件 → 打开标签 */
 	async function handleDropPaths(paths: string[]) {
 		const ts = useTabsStore.getState();
 		const tree = useTreeStore.getState();
-		let rootOpened = false;
 		for (const p of paths) {
 			const isDir = await invoke<boolean>("path_is_dir", { path: p }).catch(() => false);
 			if (isDir) {
-				if (!rootOpened) {
-					rootOpened = true;
+				const cur = tree.rootPath;
+				if (!cur) {
 					await tree.openRoot(p).catch(() => {});
+				} else if (cur.toLowerCase() !== p.toLowerCase()) {
+					// 已有工作区：新开窗口加载新目录（不关闭旧工作区，M7）
+					const { WebviewWindow } = await import(
+						"@tauri-apps/api/webviewWindow"
+					);
+					try {
+						await new WebviewWindow("workspace-" + Date.now(), {
+							url: "index.html?root=" + encodeURIComponent(p),
+							title: "简阅",
+							width: 1280,
+							height: 800,
+							minWidth: 900,
+							minHeight: 600,
+							center: true,
+							decorations: false,
+							transparent: true,
+							shadow: true,
+						});
+					} catch (e) {
+						console.warn("open new window failed:", e);
+					}
 				}
+				// 相同目录 → 忽略
 			} else {
 				await ts.openFile(p).catch(() => {});
 			}
 		}
 	}
 
-	// 会话恢复（M6）：窗口位置 + 上次目录/标签/激活标签
+	// 会话恢复（M6/M7）：窗口位置 + 上次目录/标签/激活标签；?root= 参数的新窗口跳过
 	useEffect(() => {
 		let cancelled = false;
 		void (async () => {
 			await restoreWindowBounds();
+			if (rootParam) {
+				// 多窗口：直接加载指定目录，不做会话恢复
+				try {
+					await useTreeStore.getState().openRoot(rootParam);
+				} catch {
+					/* 目录不可用则保持空工作区 */
+				}
+				return;
+			}
 			const session = loadSession();
 			if (!session?.root) return;
 			const tree = useTreeStore.getState();
@@ -206,6 +243,13 @@ export default function App() {
 								</div>
 							) : activeDoc.isNovel ? (
 								<NovelReader key={activeDoc.path} path={activeDoc.path} />
+							) : activeDoc.isImage ? (
+								<ImageViewer
+									key={activeDoc.path}
+									path={activeDoc.path}
+									size={activeDoc.size}
+									name={activeDoc.name}
+								/>
 							) : (
 								<Suspense
 									fallback={<div className="editor-loading">⏳ 正在加载编辑器…</div>}
@@ -234,11 +278,6 @@ export default function App() {
 									<kbd>Ctrl+O</kbd> 打开目录 &nbsp; <kbd>Ctrl+S</kbd> 保存 &nbsp;{" "}
 									<kbd>Ctrl+W</kbd> 关闭标签
 								</div>
-							</div>
-						)}
-						{activeDoc?.readonly && activeDoc.readonlyReason === "large" && (
-							<div className="large-file-bar">
-								⚠️ 文件超过 5MB，已转为只读保护模式（避免卡顿），仅可查看。
 							</div>
 						)}
 					</div>

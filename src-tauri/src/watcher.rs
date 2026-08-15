@@ -17,17 +17,17 @@ use tauri::{AppHandle, Emitter, Manager, State};
 const FLUSH_INTERVAL: Duration = Duration::from_millis(300);
 const IGNORE_TTL: Duration = Duration::from_secs(5);
 
-/// 保存回环抑制白名单 + 当前监听根目录
+/// 保存回环抑制白名单 + 监听根目录列表（M7：多窗口各自监听，互不覆盖）
 pub struct WatchState {
     pub ignore: Mutex<HashMap<String, (u128, Instant)>>,
-    pub root: Mutex<Option<String>>,
+    pub roots: Mutex<Vec<String>>,
 }
 
 impl Default for WatchState {
     fn default() -> Self {
         Self {
             ignore: Mutex::new(HashMap::new()),
-            root: Mutex::new(None),
+            roots: Mutex::new(Vec::new()),
         }
     }
 }
@@ -63,10 +63,13 @@ pub fn start_watch(
     path: String,
     state: State<'_, WatchState>,
 ) -> Result<(), String> {
-    let _ = stop_watch_inner(&state);
     let root = PathBuf::from(&path);
     if !root.is_dir() {
         return Err("不是有效的目录".into());
+    }
+    // 已监听同路径：直接成功（幂等）
+    if state.roots.lock().unwrap().iter().any(|r| r == &path) {
+        return Ok(());
     }
     let (tx, rx) = mpsc::channel::<Result<Event, notify::Error>>();
     let mut watcher =
@@ -77,19 +80,26 @@ pub fn start_watch(
     watcher
         .watch(&root, RecursiveMode::Recursive)
         .map_err(|e| format!("监听目录失败: {e}"))?;
-    *state.root.lock().unwrap() = Some(path.clone());
+    state.roots.lock().unwrap().push(path.clone());
     // watcher move 进线程保活；线程退出时自动 drop 停止监听
     std::thread::spawn(move || watch_loop(rx, app, path, watcher));
     Ok(())
 }
 
 #[tauri::command]
-pub fn stop_watch(state: State<'_, WatchState>) -> Result<(), String> {
-    stop_watch_inner(&state)
+pub fn stop_watch(path: String, state: State<'_, WatchState>) -> Result<(), String> {
+    stop_watch_inner(&state, &path)
 }
 
-fn stop_watch_inner(state: &WatchState) -> Result<(), String> {
-    *state.root.lock().unwrap() = None;
+/// 停止全部监听（关闭工作区用）
+#[tauri::command]
+pub fn stop_all_watches(state: State<'_, WatchState>) -> Result<(), String> {
+    state.roots.lock().unwrap().clear();
+    Ok(())
+}
+
+fn stop_watch_inner(state: &WatchState, path: &str) -> Result<(), String> {
+    state.roots.lock().unwrap().retain(|r| r != path);
     Ok(())
 }
 
@@ -121,11 +131,11 @@ fn watch_loop(
 
 fn is_current_root(app: &AppHandle, root: &str) -> bool {
     app.state::<WatchState>()
-        .root
+        .roots
         .lock()
         .unwrap()
-        .as_deref()
-        == Some(root)
+        .iter()
+        .any(|r| r == root)
 }
 
 /// 合并去重并发射事件

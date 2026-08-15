@@ -20,6 +20,9 @@ interface Props {
 const themeComp = new Compartment();
 const langComp = new Compartment();
 
+/** 大文件优化阈值：超过则跳过语法高亮（M7：解析开销大，纯文本快速打开，仍可编辑） */
+const NO_HIGHLIGHT_THRESHOLD = 3 * 1024 * 1024;
+
 export default function CodeEditor({
 	path,
 	initialContent,
@@ -71,9 +74,13 @@ export default function CodeEditor({
 		});
 	}, [theme]);
 
-	// 语言包按需加载
+	// 语言包按需加载（大文件跳过：>3MB 纯文本打开，避免高亮解析卡顿）
 	useEffect(() => {
 		let cancelled = false;
+		if (initialContent.length > NO_HIGHLIGHT_THRESHOLD) {
+			viewRef.current?.dispatch({ effects: langComp.reconfigure([]) });
+			return;
+		}
 		const lang = getLanguage(path);
 		if (!lang) {
 			viewRef.current?.dispatch({ effects: langComp.reconfigure([]) });

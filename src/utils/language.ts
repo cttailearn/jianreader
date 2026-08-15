@@ -154,6 +154,25 @@ export function getLanguage(path: string): LanguageInfo | null {
 	return { id: ext, name: entry.name, load: entry.load };
 }
 
+/** 图片文件判定（M7：以图片查看器打开，不做文本解码） */
+const IMAGE_EXTS = new Set([
+	"png",
+	"jpg",
+	"jpeg",
+	"gif",
+	"webp",
+	"svg",
+	"bmp",
+	"ico",
+	"avif",
+	"tif",
+	"tiff",
+]);
+
+export function isImagePath(path: string): boolean {
+	return IMAGE_EXTS.has(path.split(".").pop()?.toLowerCase() ?? "");
+}
+
 /** 文件名 → 文件图标（目录树/标签页用） */
 export function fileIcon(path: string, isDir: boolean): string {
 	if (isDir) return "📁";
@@ -198,6 +217,15 @@ export function fileIcon(path: string, isDir: boolean): string {
 		bash: "💻",
 		bat: "💻",
 		ps1: "💻",
+		png: "🖼️",
+		jpg: "🖼️",
+		jpeg: "🖼️",
+		gif: "🖼️",
+		webp: "🖼️",
+		svg: "🖼️",
+		bmp: "🖼️",
+		ico: "🖼️",
+		avif: "🖼️",
 	};
 	return map[ext] ?? "📄";
 }

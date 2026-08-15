@@ -6,7 +6,7 @@
 
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import { getLanguage } from "../utils/language";
+import { getLanguage, isImagePath } from "../utils/language";
 
 export type DocStatus =
 	| "loading"
@@ -16,9 +16,6 @@ export type DocStatus =
 	| "external-changed"
 	| "deleted"
 	| "error";
-
-/** 大文件保护阈值：超过则转只读（design 7.2 / P1） */
-const LARGE_FILE_THRESHOLD = 5 * 1024 * 1024;
 
 export interface TabDoc {
 	path: string;
@@ -36,6 +33,8 @@ export interface TabDoc {
 	mdView: "wysiwyg" | "source";
 	/** 小说模式标签：正文按章懒加载，不走全文 content */
 	isNovel: boolean;
+	/** 图片标签：以图片查看器渲染（不做文本解码） */
+	isImage: boolean;
 	/** 只读（磁盘只读属性 或 大文件保护），禁止编辑/保存 */
 	readonly: boolean;
 	/** 只读原因：disk 磁盘属性 / large 超过 5MB 保护 */
@@ -106,6 +105,8 @@ interface TabsState {
 	setNovelDirty: (path: string, dirty: boolean) => void;
 	/** 手动进入小说模式（txt 未自动命中时；force 扫描 ≥1 章即进入） */
 	enterNovelMode: (path: string) => Promise<boolean>;
+	/** 以阅读模式打开：先正常打开，未自动进入小说模式的 txt 强制进入（无章节按整本单章） */
+	openInReader: (path: string) => Promise<void>;
 	/** 退出小说模式：整读全文，转普通编辑标签 */
 	exitNovelMode: (path: string) => Promise<void>;
 }
@@ -126,6 +127,7 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 			name: basename(path),
 			mdView: "wysiwyg",
 			isNovel: false,
+			isImage: false,
 			readonly: false,
 			content: "",
 			encoding: "UTF-8",
@@ -137,6 +139,35 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 			rev: 0,
 		};
 		set((s) => ({ tabs: [...s.tabs, doc], activePath: path }));
+		// 图片文件：不做文本解码，直接以图片标签打开（file_meta 取大小/只读）
+		if (isImagePath(path)) {
+			try {
+				const [size, ro] = await invoke<[number, boolean]>("file_meta", { path });
+				set((s) => ({
+					tabs: s.tabs.map((t) =>
+						t.path === path
+							? {
+									...t,
+									isImage: true,
+									status: "ready",
+									size,
+									readonly: ro,
+									readonlyReason: ro ? "disk" : undefined,
+								}
+							: t,
+					),
+				}));
+			} catch (e) {
+				set((s) => ({
+					tabs: s.tabs.map((t) =>
+						t.path === path
+							? { ...t, status: "error", lastError: String(e) }
+							: t,
+					),
+				}));
+			}
+			return;
+		}
 		// txt → 尝试小说模式（章节扫描 ≥3 章自动进入，零打断）
 		if (/\.txt$/i.test(path)) {
 			const { useNovelStore } = await import("./novel");
@@ -164,15 +195,7 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 		try {
 			const p = await invoke<FilePayload>("read_text_file", { path });
 			set((s) => ({
-				tabs: s.tabs.map((t) => {
-					if (t.path !== path) return t;
-					const next = payloadToDoc(t, p);
-					// 大文件保护：>5MB 转只读（design 7.2），避免整读卡顿
-					if (!next.readonly && next.size > LARGE_FILE_THRESHOLD) {
-						return { ...next, readonly: true, readonlyReason: "large" as const };
-					}
-					return next;
-				}),
+				tabs: s.tabs.map((t) => (t.path === path ? payloadToDoc(t, p) : t)),
 			}));
 		} catch (e) {
 			set((s) => ({
@@ -461,6 +484,14 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 			),
 		}));
 		return true;
+	},
+
+	openInReader: async (path) => {
+		await get().openFile(path);
+		const doc = get().tabs.find((t) => t.path === path);
+		if (doc && !doc.isNovel && /\.txt$/i.test(path)) {
+			await get().enterNovelMode(path);
+		}
 	},
 
 	exitNovelMode: async (path) => {

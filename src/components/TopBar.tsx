@@ -84,8 +84,16 @@ export default function TopBar() {
 
 	const win = () => getCurrentWindow();
 
+	// 窗口拖拽（M7 修复）：整栏 mousedown 即可拖动，按钮区域排除。
+	// 不用 data-tauri-drag-region（透明+毛玻璃窗口下偶发失效），改 JS startDragging 更可靠
+	const onBarMouseDown = (e: React.MouseEvent) => {
+		if (e.button !== 0) return;
+		if ((e.target as HTMLElement).closest("button")) return;
+		void win().startDragging();
+	};
+
 	return (
-		<header className="topbar">
+		<header className="topbar" onMouseDown={onBarMouseDown}>
 			{/* 交通灯：关闭 / 最小化 / 最大化（macOS 惯例） */}
 			<div className="mac-lights">
 				<button
@@ -110,8 +118,12 @@ export default function TopBar() {
 					<span>＋</span>
 				</button>
 			</div>
-			{/* 标题 + 拖拽区 */}
-			<div className="topbar-center" data-tauri-drag-region>
+			{/* 标题（双击最大化由 startDragging 系统行为处理） */}
+			<div
+				className="topbar-center"
+				data-tauri-drag-region
+				onDoubleClick={() => void win().toggleMaximize()}
+			>
 				<span className="topbar-title" title={rootPath ?? "简阅"}>
 					{rootName || "简阅"}
 				</span>

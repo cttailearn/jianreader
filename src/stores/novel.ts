@@ -49,17 +49,24 @@ export const DEFAULT_SETTINGS: ReadingSettings = {
 	bg: "sepia",
 };
 
+/** 章节正文分页块大小（字节）。几十 MB 大 txt 单章/长章懒加载，避免一次性灌入 DOM */
+const CHAPTER_CHUNK = 256 * 1024;
+
 interface NovelBookState {
 	path: string;
 	scan: ScanResult;
 	/** 当前章索引 */
 	chapterIdx: number;
-	/** 当前章正文 */
+	/** 当前章已加载正文 */
 	chapterText: string;
 	/** 章节编辑状态：immutable 原文（未保存回写前的原始文本） */
 	origText: string;
 	editing: boolean;
 	loading: boolean;
+	/** 当前章已加载到的相对字节偏移（相对 ch.start；等于章长表示已完整加载） */
+	pageEnd: number;
+	/** 分页加载中 */
+	paging: boolean;
 	/** 当前章滚动位置（onScroll 实时更新，书签续读用） */
 	scrollPos: number;
 	/** 每章滚动位置记忆（chapterIdx → scrollTop，切章恢复） */
@@ -81,6 +88,10 @@ interface NovelState {
 	moveBook: (fromPath: string, toPath: string) => void;
 	/** 切到指定章（懒加载正文，记忆/恢复该章滚动位置） */
 	gotoChapter: (path: string, idx: number) => Promise<void>;
+	/** 分页加载当前章下一块（滚动到底自动调用） */
+	loadMore: (path: string) => Promise<void>;
+	/** 完整加载当前章（编辑/保存前调用，保证全文在内存） */
+	ensureFullChapter: (path: string) => Promise<void>;
 	/** 更新当前章编辑内容 */
 	setChapterText: (path: string, text: string) => void;
 	setEditing: (path: string, editing: boolean) => void;
@@ -173,7 +184,13 @@ export const useNovelStore = create<NovelState>((set, get) => ({
 	loadBook: async (path, force = false) => {
 		try {
 			const scan = await invoke<ScanResult>("scan_chapters", { path });
-			if (!scan.is_novel && !(force && scan.chapters.length >= 1)) return false;
+			if (!scan.is_novel && !(force && scan.total_bytes > 0)) return false;
+			// 无章节标题的 txt：以「全文」虚拟单章打开（M7：任意 txt 可阅读）
+			if (scan.chapters.length === 0) {
+				scan.chapters = [
+					{ title: "全文", start: 0, end: scan.total_bytes, level: 2 },
+				];
+			}
 			const settings = loadSettings(path);
 			const bookmark = loadBookmark(path);
 			const book: NovelBookState = {
@@ -184,6 +201,8 @@ export const useNovelStore = create<NovelState>((set, get) => ({
 				origText: "",
 				editing: false,
 				loading: false,
+				pageEnd: 0,
+				paging: false,
 				scrollPos: bookmark?.scrollPos ?? 0,
 				scrollMap: new Map(),
 				settings,
@@ -223,6 +242,9 @@ export const useNovelStore = create<NovelState>((set, get) => ({
 		} catch {
 			return; // 文件已不可读（随后 remove 事件会标记 deleted）
 		}
+		if (scan.chapters.length === 0 && scan.total_bytes > 0) {
+			scan.chapters = [{ title: "全文", start: 0, end: scan.total_bytes, level: 2 }];
+		}
 		if (scan.chapters.length === 0) return;
 		const idx = Math.min(book.chapterIdx, scan.chapters.length - 1);
 		set((s) => {
@@ -234,35 +256,18 @@ export const useNovelStore = create<NovelState>((set, get) => ({
 					scan,
 					chapterIdx: idx,
 					editing: false,
-					loading: true,
+					loading: false,
 					chapterText: "",
 					origText: "",
+					pageEnd: 0,
+					paging: false,
 					scrollPos: 0,
 					dirtySet: new Set(),
 				});
 			}
 			return { books };
 		});
-		const ch = scan.chapters[idx];
-		const text = await invoke<string>("read_chapter", {
-			path,
-			start: ch.start,
-			end: ch.end,
-			encoding: scan.encoding,
-		}).catch(() => "");
-		set((s) => {
-			const books = new Map(s.books);
-			const cur = books.get(path);
-			if (cur) {
-				books.set(path, {
-					...cur,
-					chapterText: stripHeadingLine(text),
-					origText: stripHeadingLine(text),
-					loading: false,
-				});
-			}
-			return { books };
-		});
+		await get().gotoChapter(path, idx);
 	},
 
 	moveBook: (fromPath, toPath) =>
@@ -289,6 +294,7 @@ export const useNovelStore = create<NovelState>((set, get) => ({
 		// 离开旧章：当前滚动位置存入 scrollMap
 		const scrollMap = new Map(book.scrollMap);
 		scrollMap.set(book.chapterIdx, book.scrollPos);
+		const firstEnd = Math.min(ch.end, ch.start + CHAPTER_CHUNK);
 		set((s) => {
 			const books = new Map(s.books);
 			const cur = books.get(path);
@@ -300,26 +306,29 @@ export const useNovelStore = create<NovelState>((set, get) => ({
 					origText: "",
 					editing: false,
 					loading: true,
+					pageEnd: 0,
+					paging: false,
 					scrollPos: scrollMap.get(idx) ?? 0,
 					scrollMap,
 				});
 			}
 			return { books };
 		});
-		// 邻章预取（下一章，提升翻页体验）
+		// 邻章预取（下一章首块，提升翻页体验）
 		const next = book.scan.chapters[idx + 1];
 		if (next) {
+			const nextEnd = Math.min(next.end, next.start + CHAPTER_CHUNK);
 			void invoke<string>("read_chapter", {
 				path,
 				start: next.start,
-				end: next.end,
+				end: nextEnd,
 				encoding: book.scan.encoding,
 			}).catch(() => {});
 		}
 		const text = await invoke<string>("read_chapter", {
 			path,
 			start: ch.start,
-			end: ch.end,
+			end: firstEnd,
 			encoding: book.scan.encoding,
 		}).catch(() => "");
 		// 剥掉首行标题（阅读视图标题单独渲染）→ store 只存正文，
@@ -334,12 +343,82 @@ export const useNovelStore = create<NovelState>((set, get) => ({
 					chapterText: body,
 					origText: body,
 					loading: false,
+					pageEnd: firstEnd - ch.start,
 				});
 			}
 			return { books };
 		});
 		// 记录续读位置（章切换即存书签）
 		get().markReading(path, idx);
+	},
+
+	loadMore: async (path) => {
+		const book = get().books.get(path);
+		if (!book || book.loading || book.paging || book.editing) return;
+		const ch = book.scan.chapters[book.chapterIdx];
+		if (!ch) return;
+		const startAbs = ch.start + book.pageEnd;
+		if (startAbs >= ch.end) return;
+		const endAbs = Math.min(ch.end, startAbs + CHAPTER_CHUNK);
+		set((s) => {
+			const books = new Map(s.books);
+			const cur = books.get(path);
+			if (cur) books.set(path, { ...cur, paging: true });
+			return { books };
+		});
+		const text = await invoke<string>("read_chapter", {
+			path,
+			start: startAbs,
+			end: endAbs,
+			encoding: book.scan.encoding,
+		}).catch(() => "");
+		set((s) => {
+			const books = new Map(s.books);
+			const cur = books.get(path);
+			if (cur && cur.chapterIdx === book.chapterIdx) {
+				books.set(path, {
+					...cur,
+					chapterText: cur.chapterText + text,
+					pageEnd: endAbs - ch.start,
+					paging: false,
+				});
+			}
+			return { books };
+		});
+	},
+
+	ensureFullChapter: async (path) => {
+		const book = get().books.get(path);
+		if (!book) return;
+		const ch = book.scan.chapters[book.chapterIdx];
+		if (!ch) return;
+		let guard = 0;
+		while (guard++ < 10000) {
+			const b = get().books.get(path);
+			const c = b?.scan.chapters[b.chapterIdx];
+			if (!b || !c) return;
+			if (b.pageEnd >= c.end - c.start) return;
+			const startAbs = c.start + b.pageEnd;
+			const endAbs = Math.min(c.end, startAbs + CHAPTER_CHUNK);
+			const text = await invoke<string>("read_chapter", {
+				path,
+				start: startAbs,
+				end: endAbs,
+				encoding: b.scan.encoding,
+			}).catch(() => "");
+			set((s) => {
+				const books = new Map(s.books);
+				const cur = books.get(path);
+				if (cur && cur.chapterIdx === b.chapterIdx) {
+					books.set(path, {
+						...cur,
+						chapterText: cur.chapterText + text,
+						pageEnd: endAbs - c.start,
+					});
+				}
+				return { books };
+			});
+		}
 	},
 
 	setChapterText: (path, text) =>
@@ -389,15 +468,19 @@ export const useNovelStore = create<NovelState>((set, get) => ({
 		if (!book) return false;
 		const ch = book.scan.chapters[book.chapterIdx];
 		if (!ch) return false;
+		// 分页模式下先完整加载（未加载的部分不能丢失）
+		await get().ensureFullChapter(path);
+		const b2 = get().books.get(path);
+		if (!b2) return false;
 		// 写回：标题行 + 正文（store 只存正文，这里拼回标题行）
 		const newSize = await invoke<number>("write_chapter", {
 			path,
 			start: ch.start,
 			end: ch.end,
-			content: composeChapter(ch.title, book.chapterText),
-			encoding: book.scan.encoding,
-			hasBom: book.scan.has_bom,
-			eol: book.scan.eol,
+			content: composeChapter(ch.title, b2.chapterText),
+			encoding: b2.scan.encoding,
+			hasBom: b2.scan.has_bom,
+			eol: b2.scan.eol,
 		});
 		// 保存后重解析章节表（章节结构可能已变），保持当前章定位
 		const scan = await invoke<ScanResult>("scan_chapters", { path });
@@ -419,13 +502,14 @@ export const useNovelStore = create<NovelState>((set, get) => ({
 			}
 			return { books };
 		});
-		// 重读当前章正文（offset 已变）
+		// 重读当前章正文（offset 已变；分页：只读首块）
 		const c2 = scan.chapters[idx];
 		if (c2) {
+			const firstEnd = Math.min(c2.end, c2.start + CHAPTER_CHUNK);
 			const text = await invoke<string>("read_chapter", {
 				path,
 				start: c2.start,
-				end: c2.end,
+				end: firstEnd,
 				encoding: scan.encoding,
 			});
 			set((s) => {
@@ -438,6 +522,8 @@ export const useNovelStore = create<NovelState>((set, get) => ({
 						chapterText: body,
 						origText: body,
 						editing: false,
+						pageEnd: firstEnd - c2.start,
+						paging: false,
 					});
 				}
 				return { books };

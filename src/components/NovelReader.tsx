@@ -55,11 +55,15 @@ export default function NovelReader({ path }: Props) {
 		}
 	}, [book?.chapterIdx, book?.loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
-	// 滚动位置实时记录（防抖写 store）
+	// 滚动位置实时记录（防抖写 store）+ 接近底部自动加载下一页（大章分页）
 	const onScroll = useCallback(() => {
 		const el = scrollRef.current;
 		if (!el) return;
 		useNovelStore.getState().setScrollPos(path, el.scrollTop);
+		// 距底 < 2400px 且未加载完 → 加载下一块
+		if (el.scrollHeight - el.scrollTop - el.clientHeight < 2400) {
+			void useNovelStore.getState().loadMore(path);
+		}
 	}, [path]);
 
 	// dirty 集合同步到标签状态（圆点/关闭确认）
@@ -70,6 +74,21 @@ export default function NovelReader({ path }: Props) {
 	if (!book) return null;
 	const ch = book.scan.chapters[book.chapterIdx];
 	const s = book.settings;
+	/** 当前章是否已完整加载（分页未完成） */
+	const chapterLoaded = ch ? book.pageEnd >= ch.end - ch.start : true;
+
+	/** 点击正文进入编辑态：大章先完整加载再编辑 */
+	const enterEdit = () => {
+		if (tabReadonly) return;
+		if (!chapterLoaded) {
+			void (async () => {
+				await useNovelStore.getState().ensureFullChapter(path);
+				useNovelStore.getState().setEditing(path, true);
+			})();
+			return;
+		}
+		setEditing(path, true);
+	};
 	const styleVars = {
 		"--novel-font-size": `${s.fontSize}px`,
 		"--novel-line-height": String(s.lineHeight),
@@ -351,22 +370,7 @@ export default function NovelReader({ path }: Props) {
 				) : (
 					<div
 						className="novel-text"
-						onClick={() => {
-							if (tabReadonly) return; // 只读：不可进入编辑态
-							setEditing(path, true);
-							// 光标定位：点击段落
-							requestAnimationFrame(() => {
-								textRef.current?.focus();
-								const sel = window.getSelection();
-								if (sel && textRef.current) {
-									const range = document.createRange();
-									range.selectNodeContents(textRef.current);
-									range.collapse(false);
-									sel.removeAllRanges();
-									sel.addRange(range);
-								}
-							});
-						}}
+						onClick={enterEdit}
 						title={tabReadonly ? "文件为只读" : "点击编辑本章"}
 					>
 						{paragraphs.map((p, i) => {
@@ -379,6 +383,7 @@ export default function NovelReader({ path }: Props) {
 					</div>
 				)}
 				<div className="novel-end">
+					{book.paging && <span className="novel-paging">加载中…</span>}
 					{book.chapterIdx < book.scan.chapters.length - 1 ? (
 						<button
 							className="novel-btn"

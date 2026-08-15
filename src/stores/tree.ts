@@ -53,12 +53,6 @@ export const useTreeStore = create<TreeState>((set, get) => ({
 	expanded: new Set(),
 
 	openRoot: async (path) => {
-		// 停旧监听（无旧监听时静默）
-		try {
-			await invoke("stop_watch");
-		} catch {
-			/* ignore */
-		}
 		const entries = await invoke<DirEntry[]>("read_dir_entries", { path });
 		const root: TreeNode = {
 			name: path.split(/[\\/]/).pop() || path,
@@ -69,7 +63,7 @@ export const useTreeStore = create<TreeState>((set, get) => ({
 			loaded: true,
 		};
 		set({ rootPath: path, rootName: root.name, root, expanded: new Set() });
-		// 启动监听（失败不阻断浏览）
+		// 启动监听（M7 多根：不停止其它窗口的监听；失败不阻断浏览）
 		try {
 			await invoke("start_watch", { path });
 		} catch (e) {
@@ -78,7 +72,9 @@ export const useTreeStore = create<TreeState>((set, get) => ({
 	},
 
 	closeRoot: () => {
-		void invoke("stop_watch").catch(() => {});
+		// M7：只停本窗口根目录的监听（多窗口各自独立）
+		const cur = get().rootPath;
+		if (cur) void invoke("stop_watch", { path: cur }).catch(() => {});
 		set({ rootPath: null, rootName: "", root: null, expanded: new Set() });
 	},
 
