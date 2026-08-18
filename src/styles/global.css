@@ -13,8 +13,8 @@ body,
 
 body {
 	font-family:
-		"Segoe UI Variable", "Segoe UI", "Microsoft YaHei", "PingFang SC",
-		system-ui, sans-serif;
+		"Segoe UI Variable", "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui,
+		sans-serif;
 	font-size: 14px;
 	color: var(--text);
 	/* 透明窗口：背景由 .app 绘制（含圆角），body 必须透明 */
@@ -267,7 +267,9 @@ body {
 	font-size: 13px;
 	line-height: 1;
 	cursor: pointer;
-	transition: background 0.12s ease, color 0.12s ease;
+	transition:
+		background 0.12s ease,
+		color 0.12s ease;
 }
 
 .win-btn:hover {
@@ -519,6 +521,115 @@ body {
 
 .context-menu-item.danger {
 	color: var(--danger);
+}
+
+/* ============ 最近打开的目录下拉（M10） ============ */
+.recent-wrap {
+	position: relative;
+}
+
+.recent-wrap .icon-btn.active {
+	background: var(--active);
+}
+
+.recent-drop {
+	position: absolute;
+	top: calc(100% + 6px);
+	right: 0;
+	z-index: 1500;
+	min-width: 260px;
+	max-width: 340px;
+	max-height: 70vh;
+	overflow-y: auto;
+	padding: 5px;
+	background: var(--glass-bg);
+	-webkit-backdrop-filter: blur(20px) saturate(1.6);
+	backdrop-filter: blur(20px) saturate(1.6);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	box-shadow: var(--shadow-2);
+}
+
+.recent-drop-label {
+	padding: 4px 10px 6px;
+	font-size: 11px;
+	color: var(--text-dim);
+	user-select: none;
+}
+
+.recent-item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 8px;
+	border-radius: var(--radius-sm);
+	cursor: pointer;
+	user-select: none;
+}
+
+.recent-item:hover {
+	background: var(--hover);
+}
+
+.recent-item-name {
+	font-size: 13px;
+	color: var(--text);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	flex-shrink: 0;
+	max-width: 45%;
+}
+
+.recent-item-path {
+	font-size: 11px;
+	color: var(--text-dim);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	flex: 1;
+}
+
+.recent-item-remove {
+	flex-shrink: 0;
+	width: 20px;
+	height: 20px;
+	border: none;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--text-dim);
+	font-size: 11px;
+	line-height: 1;
+	cursor: pointer;
+	opacity: 0;
+	padding: 0;
+}
+
+.recent-item:hover .recent-item-remove {
+	opacity: 1;
+}
+
+.recent-item-remove:hover {
+	background: var(--active);
+	color: var(--text);
+}
+
+.recent-clear {
+	margin-top: 4px;
+	width: 100%;
+	padding: 6px 8px;
+	border: none;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--text-dim);
+	font-size: 12px;
+	cursor: pointer;
+	text-align: left;
+}
+
+.recent-clear:hover {
+	background: var(--hover);
+	color: var(--text);
 }
 
 /* ============ 标签页（macOS 胶囊风格） ============ */
@@ -791,11 +902,94 @@ body {
 }
 
 /* ============ Markdown 所见即所得容器 ============ */
+.markdown-wrap {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
 .markdown-host {
 	flex: 1;
 	min-height: 0;
 	overflow-y: auto;
 	background: var(--crepe-color-background, var(--bg));
+}
+
+/* 查找/替换条（M12） */
+.md-find-bar {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 5px 12px;
+	border-bottom: 1px solid var(--border);
+	flex-shrink: 0;
+	background: var(--bg-secondary);
+	flex-wrap: wrap;
+}
+
+.md-find-input {
+	padding: 4px 8px;
+	font-size: 13px;
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	background: var(--bg);
+	color: var(--text);
+	outline: none;
+	min-width: 140px;
+}
+
+.md-find-input:focus {
+	border-color: var(--accent);
+}
+
+.md-find-input.md-find-replace {
+	min-width: 120px;
+}
+
+.md-find-count {
+	font-size: 12px;
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.md-find-btn {
+	padding: 3px 8px;
+	font-size: 12px;
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	background: var(--bg);
+	color: var(--text);
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.md-find-btn:hover {
+	background: var(--hover);
+}
+
+.md-find-btn:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+
+.md-find-sep {
+	width: 1px;
+	height: 16px;
+	background: var(--border);
+	margin: 0 2px;
+}
+
+/* M12：全量查找高亮（Decoration）：所有匹配浅色，当前匹配深色 */
+.markdown-host .md-find-match {
+	background: rgba(255, 200, 60, 0.35);
+	border-radius: 2px;
+}
+
+.markdown-host .md-find-active {
+	background: rgba(255, 160, 30, 0.8);
+	border-radius: 2px;
 }
 
 /* MD 正文可选中复制（全局 user-select:none 需在此放行；粘贴编辑保持可用） */
@@ -809,10 +1003,10 @@ body {
 
 .markdown-host .milkdown {
 	/* M8：正文显示区加宽（充分利用窗口宽度，减少两侧空白） */
-	max-width: 1500px;
+	max-width: 1700px;
 	margin: 0 auto;
 	min-height: 100%;
-	padding: 28px 40px 40vh;
+	padding: 24px 24px 40vh;
 	box-sizing: border-box;
 }
 
@@ -820,14 +1014,14 @@ body {
 	outline: none;
 }
 
-/* Crepe 暗色主题：把 nord-dark 变量注入 tokens 体系 */
+/* Crepe 暗色主题：把 nord-dark 变量注入 tokens 体系（M11：正文文字降低亮度避免刺眼） */
 [data-theme="dark"] .markdown-host .milkdown {
 	--crepe-color-background: #1b1c1d;
-	--crepe-color-on-background: #f8f9ff;
+	--crepe-color-on-background: #c8ccd4;
 	--crepe-color-surface: #111418;
 	--crepe-color-surface-low: #191c20;
-	--crepe-color-on-surface: #e1e2e8;
-	--crepe-color-on-surface-variant: #c3c6cf;
+	--crepe-color-on-surface: #b9bec7;
+	--crepe-color-on-surface-variant: #a0a6b0;
 	--crepe-color-outline: #8d9199;
 	--crepe-color-primary: #a1c9fd;
 	--crepe-color-secondary: #3c4858;
@@ -841,10 +1035,10 @@ body {
 	--crepe-color-inline-area: #111418;
 }
 
-/* ============ MD 排版精修（M7） ============ */
+/* ============ MD 排版精修（M7/M10） ============ */
 .markdown-host .milkdown .editor {
 	font-size: 15.5px;
-	line-height: 1.85;
+	line-height: 1.7;
 	color: var(--crepe-color-on-background);
 }
 
@@ -890,11 +1084,11 @@ body {
 
 /* 段落与列表 */
 .markdown-host .milkdown .editor p {
-	margin: 0.6em 0;
+	margin: 0.45em 0;
 }
 
 .markdown-host .milkdown .editor li {
-	margin: 0.25em 0;
+	margin: 0.2em 0;
 }
 
 /* 行内代码 */
@@ -959,7 +1153,7 @@ body {
 	max-width: 100%;
 }
 
-/* ============ 表格（M7：边框/表头/隔行/hover/圆角） ============ */
+/* ============ 表格（M7/M10：边框/表头/隔行/hover/圆角） ============ */
 .markdown-host .milkdown .editor table {
 	border-collapse: separate;
 	border-spacing: 0;
@@ -971,6 +1165,7 @@ body {
 	border-radius: 10px;
 	overflow: hidden;
 	background: var(--crepe-color-background);
+	table-layout: auto;
 }
 
 .markdown-host .milkdown .editor th {
@@ -978,24 +1173,25 @@ body {
 	color: var(--crepe-color-on-surface);
 	font-weight: 650;
 	text-align: left;
-	padding: 9px 14px;
+	padding: 8px 12px;
 	border-bottom: 1px solid var(--crepe-color-outline);
-	white-space: nowrap;
+	white-space: normal;
+	word-break: break-word;
+	min-width: 60px;
 }
 
 .markdown-host .milkdown .editor td {
-	padding: 8px 14px;
+	padding: 7px 12px;
 	border-bottom: 1px solid var(--crepe-color-outline);
 	vertical-align: top;
+	word-break: break-word;
 }
 
 .markdown-host .milkdown .editor tbody tr:last-child td {
 	border-bottom: none;
 }
 
-.markdown-host .milkdown .editor tbody tr:nth-child(even) {
-	background: var(--crepe-color-inline-area);
-}
+/* 表格只用表头（第一行）背景，去掉隔行斑马纹（M11） */
 
 .markdown-host .milkdown .editor tbody tr:hover {
 	background: var(--crepe-color-hover);
@@ -1027,7 +1223,9 @@ body {
 	backdrop-filter: blur(24px) saturate(1.6);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-lg);
-	box-shadow: var(--shadow-2), 0 0 0 1px var(--glass-border) inset;
+	box-shadow:
+		var(--shadow-2),
+		0 0 0 1px var(--glass-border) inset;
 	display: flex;
 	flex-direction: column;
 	gap: 12px;
@@ -1056,7 +1254,9 @@ body {
 	font-size: 13px;
 	outline: none;
 	user-select: text;
-	transition: border-color 0.12s ease, box-shadow 0.12s ease;
+	transition:
+		border-color 0.12s ease,
+		box-shadow 0.12s ease;
 }
 
 .dialog-input:focus {

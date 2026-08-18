@@ -1,6 +1,7 @@
 # 前端
 node_modules
 dist
+dist-test
 *.local
 
 # 打包产物

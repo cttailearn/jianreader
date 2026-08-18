@@ -39,6 +39,9 @@ export default function NovelReader({ path }: Props) {
 	const [replaceText, setReplaceText] = useState("");
 	const [findScope, setFindScope] = useState<"chapter" | "book">("chapter");
 	const [findIdx, setFindIdx] = useState(0);
+	// M12：跳转计数——每次用户查找/上一下操作自增，驱动滚动跳转
+	//（不依赖 findIdx 本身：单匹配时 idx 不变，但也要跳转）
+	const [jumpSeq, setJumpSeq] = useState(0);
 	// 全书搜索结果 { chapterIdx, text, matches }
 	const [bookResults, setBookResults] = useState<
 		{ chapterIdx: number; matches: number }[]
@@ -55,6 +58,7 @@ export default function NovelReader({ path }: Props) {
 	useEffect(() => {
 		const el = scrollRef.current;
 		if (el && book) el.scrollTop = book.scrollPos;
+		setFindIdx(0); // 换章后重新从第一处开始
 		if (book?.editing && textRef.current) {
 			textRef.current.focus();
 		}
@@ -127,6 +131,15 @@ export default function NovelReader({ path }: Props) {
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
 	}, []);
+
+	// M12：查找/上一个/下一个时滚动跳转到当前高亮匹配
+	// （编辑态无高亮元素 → 自然不跳转；分页加载/编辑输入/切章不触发，避免打断阅读滚动）
+	useEffect(() => {
+		if (!findText || jumpSeq === 0) return;
+		scrollRef.current
+			?.querySelector<HTMLElement>(".novel-text mark.find-active")
+			?.scrollIntoView({ block: "center", behavior: "smooth" });
+	}, [jumpSeq]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	// ---- 章内查找（虚拟高亮：匹配段落重新渲染）----
 	const findMatches = useMemo(() => {
@@ -281,10 +294,16 @@ export default function NovelReader({ path }: Props) {
 						onChange={(e) => {
 							setFindText(e.target.value);
 							setFindIdx(0);
+							setJumpSeq((n) => n + 1);
 						}}
 						onKeyDown={(e) => {
 							if (e.key === "Enter") {
-								setFindIdx((i) => (i + 1) % Math.max(1, findMatches.length));
+								setFindIdx(
+									(i) =>
+										(i + (e.shiftKey ? -1 : 1) + findMatches.length) %
+										Math.max(1, findMatches.length),
+								);
+								setJumpSeq((n) => n + 1);
 							}
 						}}
 						autoFocus
@@ -292,10 +311,34 @@ export default function NovelReader({ path }: Props) {
 					<span className="novel-find-count">
 						{findText
 							? `${findMatches.length} 处匹配${
-									findMatches.length > 0 ? `（第 ${findIdx + 1} 处）` : ""
+									findMatches.length > 0
+										? `（第 ${(findIdx % findMatches.length) + 1} 处）`
+										: ""
 								}`
 							: ""}
 					</span>
+					<button
+						className="novel-btn"
+						disabled={findMatches.length === 0}
+						onClick={() => {
+							setFindIdx((i) => (i - 1 + findMatches.length) % findMatches.length);
+							setJumpSeq((n) => n + 1);
+						}}
+						title="上一个匹配 (Shift+Enter)"
+					>
+						▲
+					</button>
+					<button
+						className="novel-btn"
+						disabled={findMatches.length === 0}
+						onClick={() => {
+							setFindIdx((i) => (i + 1) % findMatches.length);
+							setJumpSeq((n) => n + 1);
+						}}
+						title="下一个匹配 (Enter)"
+					>
+						▼
+					</button>
 					{findScope === "chapter" && (
 						<>
 							<input

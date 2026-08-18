@@ -1,10 +1,12 @@
 //! 目录树状态：按目录懒加载 entries
 //! M3：notify 事件 → applyFsEvent 增量刷新（仅重载已加载的父目录层）
+//! M10：openRoot 成功后记录最近打开的目录（recent store，顶栏下拉）
 
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import type { FsEvent } from "./watcher";
 import { useSettingsStore } from "./settings";
+import { useRecentStore } from "./recent";
 
 export interface TreeNode {
 	name: string;
@@ -67,6 +69,8 @@ export const useTreeStore = create<TreeState>((set, get) => ({
 			loaded: true,
 		};
 		set({ rootPath: path, rootName: root.name, root, expanded: new Set() });
+		// 记录最近打开的目录（顶栏下拉可快速选择，M10）
+		useRecentStore.getState().record(path);
 		// 启动监听（M7 多根：不停止其它窗口的监听；失败不阻断浏览）
 		try {
 			await invoke("start_watch", { path });

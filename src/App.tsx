@@ -20,6 +20,7 @@ import {
 	saveWindowBounds,
 } from "./stores/session";
 import { isMarkdownPath } from "./utils/mdImage";
+import { openWorkspace } from "./utils/openWorkspace";
 import { useTreeStore } from "./stores/tree";
 import { usePanelsStore } from "./stores/panels";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -78,36 +79,13 @@ export default function App() {
 	/** 拖入路径分发：目录 → 新开窗口/打开工作区；文件 → 打开标签 */
 	async function handleDropPaths(paths: string[]) {
 		const ts = useTabsStore.getState();
-		const tree = useTreeStore.getState();
 		for (const p of paths) {
-			const isDir = await invoke<boolean>("path_is_dir", { path: p }).catch(() => false);
+			const isDir = await invoke<boolean>("path_is_dir", { path: p }).catch(
+				() => false,
+			);
 			if (isDir) {
-				const cur = tree.rootPath;
-				if (!cur) {
-					await tree.openRoot(p).catch(() => {});
-				} else if (cur.toLowerCase() !== p.toLowerCase()) {
-					// 已有工作区：新开窗口加载新目录（不关闭旧工作区，M7）
-					const { WebviewWindow } = await import(
-						"@tauri-apps/api/webviewWindow"
-					);
-					try {
-						await new WebviewWindow("workspace-" + Date.now(), {
-							url: "index.html?root=" + encodeURIComponent(p),
-							title: "简阅",
-							width: 1280,
-							height: 800,
-							minWidth: 900,
-							minHeight: 600,
-							center: true,
-							decorations: false,
-							transparent: true,
-							shadow: true,
-						});
-					} catch (e) {
-						console.warn("open new window failed:", e);
-					}
-				}
-				// 相同目录 → 忽略
+				// 无工作区→原地打开；已有且不同→新开窗口；相同→忽略
+				await openWorkspace(p).catch(() => {});
 			} else {
 				await ts.openFile(p).catch(() => {});
 			}

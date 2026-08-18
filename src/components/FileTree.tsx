@@ -14,6 +14,7 @@ import {
 } from "../stores/tree";
 import { useTabsStore } from "../stores/tabs";
 import { showDialog } from "../stores/dialog";
+import { openWorkspace } from "../utils/openWorkspace";
 import { fileIcon } from "../utils/language";
 
 interface MenuState {
@@ -38,7 +39,6 @@ export default function FileTree() {
 	const root = useTreeStore((s) => s.root);
 	const rootName = useTreeStore((s) => s.rootName);
 	const expanded = useTreeStore((s) => s.expanded);
-	const openRoot = useTreeStore((s) => s.openRoot);
 	const toggleExpand = useTreeStore((s) => s.toggleExpand);
 	const refreshDir = useTreeStore((s) => s.refreshDir);
 	const refreshRoot = useTreeStore((s) => s.refreshRoot);
@@ -71,7 +71,8 @@ export default function FileTree() {
 		});
 		if (typeof dir === "string") {
 			try {
-				await openRoot(dir);
+				// 已有工作区时新开窗口，不替换当前（M11）
+				await openWorkspace(dir);
 			} catch (e) {
 				await failDialog("打开目录失败", e);
 			}
@@ -209,9 +210,7 @@ export default function FileTree() {
 		sep?: boolean;
 	}[] = [
 		{ id: "open", label: "打开" },
-		...(isTxtFile
-			? [{ id: "reader", label: "以阅读模式打开", sep: true }]
-			: []),
+		...(isTxtFile ? [{ id: "reader", label: "以阅读模式打开", sep: true }] : []),
 		{ id: "copyPath", label: "复制路径" },
 		{ id: "newfile", label: "新建文件" },
 		{ id: "newdir", label: "新建文件夹" },
@@ -267,9 +266,7 @@ export default function FileTree() {
 								<div
 									key={row.node.path}
 									className={
-										"ft-row" +
-										(active ? " active" : "") +
-										(row.node.isDir ? " dir" : "")
+										"ft-row" + (active ? " active" : "") + (row.node.isDir ? " dir" : "")
 									}
 									style={{
 										position: "absolute",

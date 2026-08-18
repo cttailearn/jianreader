@@ -36,6 +36,7 @@ export default function EditorHost(props: EditorHostProps) {
 			<MarkdownEditor
 				path={props.path}
 				initialContent={props.content}
+				theme={props.theme}
 				readonly={props.readonly}
 				onChange={props.onChange}
 				onSync={props.onSync}
