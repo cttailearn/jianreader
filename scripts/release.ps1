@@ -76,7 +76,9 @@ $manifest = [ordered]@{
   notes   = $Notes
 }
 $manifestPath = Join-Path $OutDir "latest.json"
-$manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $manifestPath -Encoding utf8
+# 用无 BOM 的 UTF-8 写 latest.json（避免某些 WebView/解析器对 BOM 敏感）
+$json = $manifest | ConvertTo-Json -Depth 5
+[System.IO.File]::WriteAllText($manifestPath, $json, [System.Text.UTF8Encoding]::new($false))
 Write-Host "==> 更新清单已生成：$manifestPath"
 
 # ---------- 6. 发布 ----------
