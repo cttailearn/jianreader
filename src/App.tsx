@@ -5,6 +5,7 @@ import FileTree from "./components/FileTree";
 import TabBar from "./components/TabBar";
 import DialogModal from "./components/DialogModal";
 import ExternalChangeBar from "./components/ExternalChangeBar";
+import UpdateNotice from "./components/UpdateNotice";
 import TocPanel from "./components/TocPanel";
 import ChapterPanel from "./components/ChapterPanel";
 import NovelReader from "./components/NovelReader";
@@ -24,9 +25,11 @@ import { openWorkspace } from "./utils/openWorkspace";
 import { useTreeStore } from "./stores/tree";
 import { usePanelsStore } from "./stores/panels";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { matchKey, useKeymapStore } from "./stores/keymap";
 import { useSettingsStore } from "./stores/settings";
+import { useUpdaterStore } from "./stores/updater";
 import SettingsPanel from "./components/SettingsPanel";
 
 // 编辑器内核懒加载：首屏不打包 CM6，点开文件才加载（design 7.1）
@@ -188,6 +191,25 @@ export default function App() {
 		return () => unlisten?.();
 	}, []);
 
+	// 启动自动检查更新（仅主窗口执行；多窗口工作区窗口不重复检查/不弹横幅）
+	useEffect(() => {
+		let cancelled = false;
+		const t = setTimeout(() => {
+			if (cancelled) return;
+			try {
+				if (getCurrentWindow().label === "main") {
+					void useUpdaterStore.getState().checkNow(true);
+				}
+			} catch {
+				/* 非 Tauri 环境（web 预览）忽略 */
+			}
+		}, 2500);
+		return () => {
+			cancelled = true;
+			clearTimeout(t);
+		};
+	}, []);
+
 	return (
 		<div className="app">
 			<TopBar />
@@ -280,6 +302,7 @@ export default function App() {
 			<StatusBar />
 			<DialogModal />
 			<SettingsPanel />
+			<UpdateNotice />
 			{dragOver && (
 				<div className="drop-overlay">
 					<div className="drop-overlay-inner">松开以打开</div>

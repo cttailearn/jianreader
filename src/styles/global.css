@@ -1912,3 +1912,102 @@ body {
 	border: 1px solid rgba(0, 0, 0, 0.15);
 	display: inline-block;
 }
+
+/* ============ 软件更新（内建更新器） ============ */
+
+/* 右下角新版本提示横幅 */
+.update-notice {
+	position: fixed;
+	right: 16px;
+	bottom: 48px;
+	z-index: 2300;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	max-width: 420px;
+	padding: 10px 12px;
+	background: var(--glass-bg);
+	-webkit-backdrop-filter: blur(24px) saturate(1.6);
+	backdrop-filter: blur(24px) saturate(1.6);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	box-shadow: var(--shadow-2);
+	animation: update-notice-in 0.25s ease;
+}
+
+@keyframes update-notice-in {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+.update-notice-icon {
+	font-size: 18px;
+	flex-shrink: 0;
+}
+
+.update-notice-text {
+	min-width: 0;
+	flex: 1;
+}
+
+.update-notice-title {
+	font-size: 13px;
+	font-weight: 650;
+	color: var(--text);
+}
+
+.update-notice-notes {
+	font-size: 11.5px;
+	color: var(--text-muted);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	margin-top: 1px;
+}
+
+.update-notice-btn {
+	flex-shrink: 0;
+}
+
+.update-notice-close {
+	flex-shrink: 0;
+}
+
+/* 下载/校验进度条 */
+.update-progress-track {
+	height: 6px;
+	width: 100%;
+	border-radius: 3px;
+	background: var(--bg-secondary);
+	overflow: hidden;
+	box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.update-progress-fill {
+	height: 100%;
+	border-radius: 3px;
+	background: var(--accent);
+	transition: width 0.15s ease;
+}
+
+.settings-update-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 7px 2px;
+}
+
+.settings-update-note {
+	padding: 7px 2px;
+}
+
+.settings-update-error {
+	flex-wrap: wrap;
+}
+

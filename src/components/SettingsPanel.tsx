@@ -5,12 +5,19 @@ import { useEffect, useState } from "react";
 import { useSettingsStore } from "../stores/settings";
 import { useThemeStore } from "../stores/theme";
 import { useTreeStore } from "../stores/tree";
+import { useUpdaterStore } from "../stores/updater";
 import {
 	eventToCombo,
 	KEY_ACTION_LABELS,
 	useKeymapStore,
 	type KeyAction,
 } from "../stores/keymap";
+
+function fmtBytes(n: number): string {
+	if (n < 1024) return `${n} B`;
+	if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+	return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 function Switch({
 	checked,
@@ -51,6 +58,8 @@ export default function SettingsPanel() {
 	const keymap = useKeymapStore((s) => s.keymap);
 	const setKey = useKeymapStore((s) => s.setKey);
 	const resetKeys = useKeymapStore((s) => s.reset);
+	const upd = useUpdaterStore();
+	const updStatus = upd.status;
 	const [recording, setRecording] = useState<KeyAction | null>(null);
 	const [conflict, setConflict] = useState(false);
 
@@ -124,6 +133,93 @@ export default function SettingsPanel() {
 					label="大文件语法高亮"
 					desc=">3MB 文件也加载语法高亮（默认关闭以加快打开）"
 				/>
+
+				<div className="settings-section">软件更新</div>
+				<div className="settings-row">
+					<div className="settings-row-text">
+						<div className="settings-row-label">当前版本</div>
+						<div className="settings-row-desc">
+							{upd.currentVersion ? `v${upd.currentVersion}` : "—"}
+							{upd.lastChecked
+								? ` · 上次检查 ${new Date(upd.lastChecked).toLocaleTimeString()}`
+								: ""}
+						</div>
+					</div>
+					<button
+						className="novel-btn"
+						disabled={updStatus === "checking" || updStatus === "downloading"}
+						onClick={() => void upd.checkNow()}
+					>
+						{updStatus === "checking" ? "检查中…" : "检查更新"}
+					</button>
+				</div>
+				<Switch
+					checked={settings.autoCheckUpdate}
+					onChange={(v) => setSettings({ autoCheckUpdate: v })}
+					label="启动时自动检查"
+					desc="启动后后台检查 GitHub Releases 是否有新版本"
+				/>
+				{updStatus === "available" && upd.info && (
+					<div className="settings-row">
+						<div className="settings-row-text">
+							<div className="settings-row-label">
+								🔄 发现新版本 v{upd.info.version}
+							</div>
+							{upd.info.notes && (
+								<div className="settings-row-desc">
+									{upd.info.notes.slice(0, 120)}
+								</div>
+							)}
+						</div>
+						<button
+							className="novel-btn"
+							onClick={() => void upd.startDownload()}
+						>
+							下载并安装
+						</button>
+					</div>
+				)}
+				{(updStatus === "downloading" || updStatus === "verifying") && (
+					<div className="settings-update-row">
+						<div className="update-progress-track">
+							<div
+								className="update-progress-fill"
+								style={{
+									width: `${
+										upd.total > 0
+											? Math.round(upd.progress * 100)
+											: 0
+									}%`,
+								}}
+							/>
+						</div>
+						<div className="settings-row-desc">
+							{updStatus === "verifying"
+								? `校验安装包中…`
+								: `${fmtBytes(upd.downloaded)}${
+										upd.total > 0 ? ` / ${fmtBytes(upd.total)}` : ""
+								  }`}
+						</div>
+					</div>
+				)}
+				{updStatus === "installing" && (
+					<div className="settings-row-desc settings-update-note">
+						🔄 更新已就绪，应用即将退出并完成安装，请稍后重新打开简阅。
+					</div>
+				)}
+				{updStatus === "upToDate" && (
+					<div className="settings-row-desc settings-update-note">
+						✓ 已是最新版本
+					</div>
+				)}
+				{updStatus === "error" && upd.error && (
+					<div className="settings-update-row settings-update-error">
+						<span className="settings-conflict">⚠️ {upd.error}</span>
+						<button className="novel-btn" onClick={() => void upd.checkNow()}>
+							重试
+						</button>
+					</div>
+				)}
 
 				<div className="settings-section">快捷键（点击按键即可修改）</div>
 				{actions.map((a) => (

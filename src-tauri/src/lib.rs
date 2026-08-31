@@ -4,9 +4,11 @@
 //! M2：fs 命令（编码检测读写/目录列举/文件操作）。
 //! M3：watcher（目录监听，notify → fs-event 推送）。
 //! M6：启动自检（WebView2 缺失检测 + panic 诊断），绿色版闪退可定位。
+//! M13：轻量更新器（updater.rs）：前端下载 → base64 落盘 → SHA-256（PowerShell）→ 静默安装。
 
 mod fs;
 mod novel;
+mod updater;
 mod watcher;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -34,6 +36,10 @@ pub fn run() {
             novel::scan_chapters,
             novel::read_chapter,
             novel::write_chapter,
+            updater::prepare_update_dir,
+            updater::write_update_chunk,
+            updater::sha256_file,
+            updater::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -12,12 +12,15 @@ export interface AppSettings {
 	showHidden: boolean;
 	/** 大文件（>3MB）加载语法高亮（默认关：更快） */
 	largeFileHighlight: boolean;
+	/** 启动时自动检查更新（默认开） */
+	autoCheckUpdate: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
 	autoSave: false,
 	showHidden: false,
 	largeFileHighlight: false,
+	autoCheckUpdate: true,
 };
 
 function load(): AppSettings {
