@@ -54,6 +54,12 @@
 - 设置面板：主题 / 自动保存（2s 防抖）/ 显示隐藏文件 / 大文件语法高亮
 - **快捷键全部可自定义**：保存 / 打开目录 / 关闭标签 / 切换主题 / 下一个标签 / 阅读查找（点击录制 + 冲突检测）
 
+### 🔄 软件更新
+- **启动自动检查 + 设置面板手动检查**：通过 GitHub Releases 检测新版本（可关闭自动检查）
+- 发现新版本 → 右下角横幅提示，一键下载（显示进度）→ **SHA-256 双重校验**（内存 + 写盘后）→ 静默安装 → 重启生效
+- 更新源：`https://github.com/cttailearn/jianreader/releases/latest/download/latest.json`
+- 实现在 `src/utils/updater.ts`（前端下载/校验）+ `src-tauri/src/updater.rs`（落盘/校验/静默安装），零新增依赖
+
 ---
 
 ## 🚀 安装使用
@@ -89,6 +95,25 @@ npm run tauri build
 powershell -ExecutionPolicy Bypass -File scripts/package-portable.ps1
 ```
 
+### 发布新版本（更新检查的物料）
+
+> 应用通过 `releases/latest/download/latest.json` 检查更新，因此每次发布**必须**把 `latest.json` 作为资产上传。
+
+```bash
+# 1) 同步 bump 版本：package.json / src-tauri/Cargo.toml / src-tauri/tauri.conf.json 三处 version
+
+# 2) 构建安装包（产物：src-tauri/target/release/bundle/nsis/jianreader-setup_<v>_x64-setup.exe）
+npm run tauri build
+
+# 3) 生成更新清单 latest.json（含 version / url / sha256 / notes）到 .\release\
+powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Notes "更新说明"
+
+# 4) 发布：脚本自动用 gh CLI（需已登录）或按提示网页手动上传
+powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Publish -Notes "..."
+#    网页方式：github.com/cttailearn/jianreader/releases/new
+#    Tag = vX.Y.Z，上传 jianreader-setup_<v>_x64-setup.exe 和 latest.json 两个资产
+```
+
 ### 技术栈
 
 | 层 | 技术 |
@@ -106,15 +131,17 @@ powershell -ExecutionPolicy Bypass -File scripts/package-portable.ps1
 ├── src/                  # 前端
 │   ├── components/       # 顶栏/目录树/标签页/状态栏/阅读器/图片查看/设置面板...
 │   ├── editors/          # CodeMirror / Milkdown 编辑器封装与分发
-│   ├── stores/           # zustand：tabs/tree/novel/settings/keymap/theme...
+│   ├── stores/           # zustand：tabs/tree/novel/settings/updater/keymap/theme...
 │   ├── styles/           # 语义色 token（双主题）+ 全局样式
-│   └── utils/            # 语言映射/章节解析辅助/md 图片与表格规范化
+│   └── utils/            # 语言映射/章节解析辅助/md 图片与表格规范化/updater 下载校验
 ├── src-tauri/            # Rust 壳
 │   ├── src/fs.rs         # 读文件(编码检测)/写文件(原编码回写)/目录操作
 │   ├── src/novel.rs      # 章节流式扫描/按章懒加载/分页边界对齐
+│   ├── src/updater.rs    # 更新：base64 落盘/SHA-256(PowerShell)/静默安装+退出
 │   ├── src/watcher.rs    # notify 目录监听（多根，窗口销毁自清理）
 │   └── src/lib.rs        # 命令注册 + WebView2 检测 + panic 诊断
 ├── scripts/package-portable.ps1  # 绿色版打包脚本
+└── scripts/release.ps1           # 发布：构建→sha256→latest.json→GitHub Release
 └── test-fixtures/        # UTF-8/GBK 小说测试样本
 ```
 
