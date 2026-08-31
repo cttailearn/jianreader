@@ -1,6 +1,6 @@
 [package]
 name = "text-viewer-editor"
-version = "0.2.0"
+version = "0.3.0"
 description = "简阅 —— 轻量文本查看编辑器"
 edition = "2021"
 
