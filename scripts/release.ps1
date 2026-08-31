@@ -81,21 +81,34 @@ $json = $manifest | ConvertTo-Json -Depth 5
 [System.IO.File]::WriteAllText($manifestPath, $json, [System.Text.UTF8Encoding]::new($false))
 Write-Host "==> 更新清单已生成：$manifestPath"
 
+# ---------- 5b. 绿色版（便携 zip，解压即用） ----------
+pushd $repoRoot
+try { powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "package-portable.ps1") | Out-Null }
+finally { popd }
+$portableSrc = Get-ChildItem -Path $OutDir -Filter "简阅-绿色版-*.zip" -ErrorAction SilentlyContinue |
+  Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if (-not $portableSrc) { throw "绿色版打包失败：release/ 下未找到 简阅-绿色版-*.zip" }
+$portableName = "jianreader-portable_${Version}_x64.zip"
+$portableCopy = Join-Path $OutDir $portableName
+Copy-Item $portableSrc.FullName $portableCopy -Force
+$portableHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $portableCopy).Hash.ToLower()
+Write-Host "==> 绿色版：$portableName（SHA-256：$portableHash）"
+
 # ---------- 6. 发布 ----------
 if ($Publish) {
   $gh = Get-Command gh -ErrorAction SilentlyContinue
   if (-not $gh) { throw "未找到 gh CLI。请安装 https://cli.github.com 并执行 gh auth login，或用 Web 手动上传。" }
   Write-Host "==> gh release create $tag ..."
-  gh release create $tag $exeCopy $manifestPath --repo cttailearn/jianreader --title "简阅 $Version" --notes $Notes
+  gh release create $tag $exeCopy $manifestPath $portableCopy --repo cttailearn/jianreader --title "简阅 $Version" --notes $Notes
   if ($LASTEXITCODE -ne 0) { throw "gh release create 失败（exit $LASTEXITCODE）" }
   Write-Host "==> 已发布：https://github.com/cttailearn/jianreader/releases/tag/$tag"
 } else {
   Write-Host ""
   Write-Host "==> 手动发布（二选一）："
   Write-Host "   A) 已登录 gh CLI 时执行："
-  Write-Host "      gh release create $tag `"$exeCopy`" `"$manifestPath`" --repo cttailearn/jianreader --title `"简阅 $Version`" --notes `"$Notes`""
+  Write-Host "      gh release create $tag `"$exeCopy`" `"$manifestPath`" `"$portableCopy`" --repo cttailearn/jianreader --title `"简阅 $Version`" --notes `"$Notes`""
   Write-Host "   B) 网页：github.com/cttailearn/jianreader/releases/new"
   Write-Host "      - Tag：$tag    标题：简阅 $Version"
-  Write-Host "      - 上传两个资产：$assetsName  和  latest.json"
+  Write-Host "      - 上传三个资产：$assetsName  和  latest.json  和  $portableName（绿色版）"
   Write-Host "      - 发布后应用即可检查到更新（经 /releases/latest/download/ 访问 latest.json）"
 }

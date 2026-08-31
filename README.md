@@ -105,13 +105,14 @@ powershell -ExecutionPolicy Bypass -File scripts/package-portable.ps1
 # 2) 构建安装包（产物：src-tauri/target/release/bundle/nsis/jianreader-setup_<v>_x64-setup.exe）
 npm run tauri build
 
-# 3) 生成更新清单 latest.json（含 version / url / sha256 / notes）到 .\release\
+# 3) 生成更新清单 latest.json + 绿色版便携 zip（含 version / url / sha256 / notes）到 .\release\
 powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Notes "更新说明"
 
 # 4) 发布：脚本自动用 gh CLI（需已登录）或按提示网页手动上传
 powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Publish -Notes "..."
 #    网页方式：github.com/cttailearn/jianreader/releases/new
-#    Tag = vX.Y.Z，上传 jianreader-setup_<v>_x64-setup.exe 和 latest.json 两个资产
+#    Tag = vX.Y.Z，上传三个资产：jianreader-setup_<v>_x64-setup.exe、latest.json、
+#    jianreader-portable_<v>_x64.zip（绿色版，解压即用）
 ```
 
 ### 技术栈
