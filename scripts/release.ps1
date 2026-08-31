@@ -49,13 +49,13 @@ if ($Build) {
   try { npm run tauri build } finally { Pop-Location }
 }
 
-# ---------- 3. 定位 NSIS 安装包（productName 命名，如 简阅_0.3.0_x64-setup.exe） ----------
+# ---------- 3. 定位 NSIS 安装包（productName 命名，如 简阅_0.3.0_x64-setup.exe；须匹配当前版本，避免误选旧版残留） ----------
 $nsisDir = Join-Path $repoRoot "src-tauri\target\release\bundle\nsis"
 $exe = Get-ChildItem -Path $nsisDir -File -ErrorAction SilentlyContinue |
-  Where-Object { $_.Name -like '*_x64-setup.exe' } |
+  Where-Object { $_.Name -like "*_${Version}_x64-setup.exe" } |
   Select-Object -First 1
 if (-not $exe) {
-  throw "未找到安装包：$nsisDir 下应存在 *_x64-setup.exe（请先构建，或加上 -Build）"
+  throw "未找到匹配版本 v${Version} 的安装包：$nsisDir 下应存在 *_${Version}_x64-setup.exe（请先构建，或加上 -Build）"
 }
 # 资产统一用 ASCII 名，避免 GitHub URL 中文转义问题
 $assetsName = "jianreader-setup_${Version}_x64-setup.exe"
