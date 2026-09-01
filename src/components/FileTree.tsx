@@ -243,14 +243,7 @@ export default function FileTree() {
 				</button>
 			</div>
 
-			{!root ? (
-				<div className="panel-left-body">
-					打开一个文件夹开始浏览
-					<br />
-					<br />
-					<kbd>Ctrl+O</kbd> 或拖拽文件夹到窗口
-				</div>
-			) : (
+			{!root ? null : (
 				<div className="filetree-scroll" ref={parentRef}>
 					<div
 						style={{

@@ -751,11 +751,25 @@ body {
 
 .code-editor-host .cm-editor {
 	height: 100%;
-	font-size: 14px;
+	font-size: var(--editor-font-size, 14px);
+	/* 浅色：柔和米白替代纯白（var 未定义时即暗色，交给主题自身） */
+	background: var(--editor-bg);
 }
 
 .code-editor-host .cm-editor.cm-focused {
 	outline: none;
+}
+
+.code-editor-host .cm-gutters {
+	background: var(--editor-gutter-bg);
+}
+
+.code-editor-host .cm-activeLine {
+	background: var(--editor-active-line);
+}
+
+.code-editor-host .cm-activeLineGutter {
+	background: color-mix(in srgb, var(--editor-active-line) 55%, transparent);
 }
 
 .code-editor-host .cm-scroller {
@@ -917,6 +931,11 @@ body {
 	background: var(--crepe-color-background, var(--bg));
 }
 
+/* 浅色正文区柔和米白（替代 Crepe 纯白底） */
+[data-theme="light"] .markdown-host {
+	background: var(--editor-bg);
+}
+
 /* 查找/替换条（M12） */
 .md-find-bar {
 	display: flex;
@@ -1035,9 +1054,31 @@ body {
 	--crepe-color-inline-area: #111418;
 }
 
+/* Crepe 浅色主题：正文区用浅灰白（近白非纯白，避免刺眼），中性色文字保证对比度 */
+[data-theme="light"] .markdown-host .milkdown {
+	--crepe-color-background: var(--editor-bg, #f7f7f8);
+	--crepe-color-on-background: #1f1f23;
+	--crepe-color-surface: #f5f5f6;
+	--crepe-color-surface-low: #f0f0f2;
+	--crepe-color-on-surface: #222226;
+	--crepe-color-on-surface-variant: #5c5c62;
+	--crepe-color-outline: #8a8a92;
+	--crepe-color-primary: #35607f;
+	--crepe-color-secondary: #dbe6f5;
+	--crepe-color-on-secondary: #14202e;
+	--crepe-color-inverse: #2e3135;
+	--crepe-color-on-inverse: #f5f5f7;
+	--crepe-color-inline-code: #9a3b22;
+	--crepe-color-error: #9a3b22;
+	--crepe-color-hover: #ececef;
+	--crepe-color-selected: #e3e3e7;
+	--crepe-color-inline-area: #efeff1;
+}
+
 /* ============ MD 排版精修（M7/M10） ============ */
 .markdown-host .milkdown .editor {
-	font-size: 15.5px;
+	font-size: var(--editor-font-size, 15.5px);
+	font-family: var(--editor-font-family, inherit);
 	line-height: 1.7;
 	color: var(--crepe-color-on-background);
 }
@@ -1678,7 +1719,8 @@ body {
 }
 
 .novel-bg-light {
-	background: #ffffff;
+	/* 柔和米白替代纯白（避免刺眼） */
+	background: #faf8f2;
 	color: #1f1f1f;
 }
 
@@ -1703,9 +1745,14 @@ body {
 	cursor: text;
 	min-height: 100%;
 	box-sizing: border-box;
-	font-family:
-		"Microsoft YaHei", "PingFang SC", "Source Han Sans SC", "Noto Sans CJK SC",
-		sans-serif;
+	font-family: var(
+		--editor-font-family,
+		"Microsoft YaHei",
+		"PingFang SC",
+		"Source Han Sans SC",
+		"Noto Sans CJK SC",
+		sans-serif
+	);
 }
 
 .novel-text p {

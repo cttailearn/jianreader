@@ -1,4 +1,4 @@
-//! 状态栏：主题 | 编码 | 语言 | 行:列 | 修改标记 | 文件大小 | 版本
+//! 状态栏：统计(字符/行) | 主题 | 编码 | 语言 | 行:列 | 修改标记 | 文件大小 | 版本
 
 import { useThemeStore } from "../stores/theme";
 import { useTabsStore } from "../stores/tabs";
@@ -6,6 +6,8 @@ import { useCursorStore } from "../stores/ui";
 import { useNovelStore } from "../stores/novel";
 import { formatSize } from "./FileTree";
 import { isMarkdownPath } from "../utils/mdImage";
+// 版本号跟随 package.json（发版 bump 时状态栏自动更新）
+import pkg from "../../package.json";
 
 export default function StatusBar() {
 	const mode = useThemeStore((s) => s.mode);
@@ -44,6 +46,28 @@ export default function StatusBar() {
 			</span>
 			{doc && (
 				<>
+					{!doc.isNovel && !doc.isImage && (
+						<span
+							className="statusbar-item"
+							title={`文档共 ${doc.content.length.toLocaleString()} 个字符、${
+								doc.content.split("\n").length.toLocaleString()
+							} 行`}
+						>
+							{doc.content.length.toLocaleString()} 字符 ·{" "}
+							{doc.content.split("\n").length.toLocaleString()} 行
+						</span>
+					)}
+					{doc.isNovel && novelBook && (
+						<span
+							className="statusbar-item"
+							title={`当前章共 ${novelBook.chapterText.length.toLocaleString()} 个字符、${
+								novelBook.chapterText.split("\n").length.toLocaleString()
+							} 行`}
+						>
+							{novelBook.chapterText.length.toLocaleString()} 字符 ·{" "}
+							{novelBook.chapterText.split("\n").length.toLocaleString()} 行
+						</span>
+					)}
 					<span className="statusbar-item" title="文件编码">
 						{doc.encoding}
 					</span>
@@ -110,7 +134,7 @@ export default function StatusBar() {
 				</>
 			)}
 			<span className="statusbar-spacer" />
-			<span className="statusbar-item">简阅 v0.1.0</span>
+			<span className="statusbar-item">简阅 v{pkg.version}</span>
 		</footer>
 	);
 }

@@ -131,13 +131,24 @@ export const useTreeStore = create<TreeState>((set, get) => ({
 				path,
 				showHidden: useSettingsStore.getState().settings.showHidden,
 			});
-			set((s) => ({
-				root: patchNode(s.root, path, {
-					children: entries.map(toNode),
-					loaded: true,
-					loading: false,
-				}),
-			}));
+			set((s) => {
+				// 保留已加载子目录节点：刷新父层时，已展开子目录的 children/loaded
+				// 不被新条目覆盖（否则展开的子目录会视觉"收纳"，M 修正）
+				const oldNode = findNode(s.root, path);
+				const oldByPath = new Map<string, TreeNode>();
+				for (const c of oldNode?.children ?? []) oldByPath.set(c.path, c);
+				const children = entries.map((e) => {
+					const old = oldByPath.get(e.path);
+					return old && old.isDir && old.loaded ? old : toNode(e);
+				});
+				return {
+					root: patchNode(s.root, path, {
+						children,
+						loaded: true,
+						loading: false,
+					}),
+				};
+			});
 		} catch {
 			/* 目录可能已不存在 */
 		}

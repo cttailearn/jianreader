@@ -28,7 +28,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { matchKey, useKeymapStore } from "./stores/keymap";
-import { useSettingsStore } from "./stores/settings";
+import { FONT_FAMILY_OPTIONS, useSettingsStore } from "./stores/settings";
 import { useUpdaterStore } from "./stores/updater";
 import SettingsPanel from "./components/SettingsPanel";
 
@@ -40,6 +40,20 @@ export default function App() {
 	useEffect(() => {
 		document.documentElement.dataset.theme = mode;
 	}, [mode]);
+
+	// 文本字号/字体：设置变化后以 CSS 变量驱动正文渲染（代码/Markdown/小说）
+	const editorFontSize = useSettingsStore((s) => s.settings.editorFontSize);
+	const editorFontFamily = useSettingsStore((s) => s.settings.editorFontFamily);
+	useEffect(() => {
+		const root = document.documentElement;
+		root.style.setProperty("--editor-font-size", `${editorFontSize}px`);
+		const fam =
+			FONT_FAMILY_OPTIONS.find((f) => f.id === editorFontFamily)?.family ??
+			null;
+		// 系统默认 → 移除变量，各文本区回退到各自的默认字体
+		if (fam) root.style.setProperty("--editor-font-family", fam);
+		else root.style.removeProperty("--editor-font-family");
+	}, [editorFontSize, editorFontFamily]);
 
 	const tabs = useTabsStore((s) => s.tabs);
 	const activePath = useTabsStore((s) => s.activePath);
@@ -100,6 +114,26 @@ export default function App() {
 		let cancelled = false;
 		void (async () => {
 			await restoreWindowBounds();
+			// 文件关联启动：系统用"打开方式/默认程序"打开文件/目录时，argv 里有路径，
+			// 应优先打开它，而非恢复"上次目录"（修复：双击文件却打开旧目录）
+			const launchPath = await invoke<string | null>("get_launch_path").catch(() => null);
+			if (launchPath) {
+				const tree = useTreeStore.getState();
+				const ts = useTabsStore.getState();
+				const isDir = await invoke<boolean>("path_is_dir", { path: launchPath }).catch(
+					() => false,
+				);
+				if (isDir) {
+					await tree.openRoot(launchPath).catch(() => {});
+				} else {
+					const parent = launchPath.replace(/[\\/][^\\/]*$/, "");
+					if (parent && parent !== launchPath) {
+						await tree.openRoot(parent).catch(() => {});
+					}
+					await ts.openFile(launchPath).catch(() => {});
+				}
+				return;
+			}
 			if (rootParam) {
 				// 多窗口：直接加载指定目录，不做会话恢复
 				try {
@@ -263,7 +297,7 @@ export default function App() {
 									fallback={<div className="editor-loading">⏳ 正在加载编辑器…</div>}
 								>
 									<EditorHost
-										key={`${activeDoc.path}:${activeDoc.rev}:${activeDoc.mdView}`}
+										key={`${activeDoc.path}:${activeDoc.rev}:${activeDoc.mdView}:${mode}`}
 										path={activeDoc.path}
 										content={activeDoc.content}
 										theme={mode}

@@ -21,6 +21,10 @@
 	--danger: #ff3b30;
 	--warning-bg: #fff7e6;
 	--warning-border: #e8c98a;
+	/* 浅灰白：正文编辑区背景（近白但非纯白，避免刺眼） */
+	--editor-bg: #f7f7f8;
+	--editor-gutter-bg: #eef0f2;
+	--editor-active-line: #e9ebef;
 	/* macOS 风格补充 token */
 	--titlebar-h: 44px;
 	--radius-sm: 6px;

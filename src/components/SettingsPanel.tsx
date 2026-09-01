@@ -2,7 +2,7 @@
 //! 由 TopBar 齿轮按钮打开；打开期间屏蔽全局快捷键
 
 import { useEffect, useState } from "react";
-import { useSettingsStore } from "../stores/settings";
+import { FONT_FAMILY_OPTIONS, useSettingsStore } from "../stores/settings";
 import { useThemeStore } from "../stores/theme";
 import { useTreeStore } from "../stores/tree";
 import { useUpdaterStore } from "../stores/updater";
@@ -133,6 +133,50 @@ export default function SettingsPanel() {
 					label="大文件语法高亮"
 					desc=">3MB 文件也加载语法高亮（默认关闭以加快打开）"
 				/>
+
+				<div className="settings-section">阅读与编辑</div>
+				<div className="settings-row">
+					<div className="settings-row-text">
+						<div className="settings-row-label">正文字号</div>
+						<div className="settings-row-desc">
+							代码编辑器与 Markdown 正文（小说阅读字号在其阅读设置中调整）
+						</div>
+					</div>
+					<input
+						type="range"
+						min={12}
+						max={24}
+						step={0.5}
+						value={settings.editorFontSize}
+						onChange={(e) =>
+							setSettings({ editorFontSize: Number(e.target.value) })
+						}
+						title={`${settings.editorFontSize}px`}
+						style={{ width: 140, accentColor: "var(--accent)" }}
+					/>
+					<span className="settings-row-desc" style={{ minWidth: 34 }}>
+						{settings.editorFontSize}px
+					</span>
+				</div>
+				<div className="settings-row">
+					<div className="settings-row-text">
+						<div className="settings-row-label">正文/小说字体</div>
+						<div className="settings-row-desc">
+							作用于 Markdown 正文与小说阅读文字，立即生效
+						</div>
+					</div>
+					<select
+						className="novel-settings-select"
+						value={settings.editorFontFamily}
+						onChange={(e) => setSettings({ editorFontFamily: e.target.value })}
+					>
+						{FONT_FAMILY_OPTIONS.map((f) => (
+							<option key={f.id} value={f.id}>
+								{f.label}
+							</option>
+						))}
+					</select>
+				</div>
 
 				<div className="settings-section">软件更新</div>
 				<div className="settings-row">

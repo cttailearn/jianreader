@@ -7,6 +7,7 @@
 //! M13：轻量更新器（updater.rs）：前端下载 → base64 落盘 → SHA-256（PowerShell）→ 静默安装。
 
 mod fs;
+mod launch;
 mod novel;
 mod updater;
 mod watcher;
@@ -17,6 +18,8 @@ pub fn run() {
     if !check_webview2() {
         return;
     }
+    // 捕获启动参数（文件关联"打开方式"把文件/目录路径作为 argv 传入），供前端优先打开
+    launch::capture();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -39,7 +42,10 @@ pub fn run() {
             updater::prepare_update_dir,
             updater::write_update_chunk,
             updater::sha256_file,
+            updater::download_text,
+            updater::download_file,
             updater::install_update,
+            launch::get_launch_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
