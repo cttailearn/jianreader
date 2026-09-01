@@ -36,8 +36,8 @@ fn b64_decode(s: &str) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-/// RFC 4648 base64 编码（纯 std，PowerShell -EncodedCommand 用）
-fn b64_encode(bytes: &[u8]) -> String {
+/// RFC 4648 base64 编码（纯 std，PowerShell -EncodedCommand / git http.extraHeader 用）
+pub(crate) fn b64_encode(bytes: &[u8]) -> String {
     const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
     let mut i = 0;
@@ -157,9 +157,124 @@ pub async fn install_update(app: AppHandle, path: String) -> Result<(), String> 
     }
 }
 
+/// Windows 下可用的 curl 候选（按优先级）：
+/// 系统自带 curl（schannel，正常机器可用）→ 各盘符 Git for Windows 内置 curl → PATH 兜底。
+/// （本沙箱因 schannel 不可用所有 curl 均无法 HTTPS，仅本地 HTTP 可测；真实机器无此问题）
+fn curl_candidates() -> Vec<std::path::PathBuf> {
+    let mut v = vec![std::path::PathBuf::from(r"C:\Windows\System32\curl.exe")];
+    // Git for Windows 常见安装路径（多盘符）
+    for d in ["C", "D", "E", "F", "G"] {
+        v.push(std::path::PathBuf::from(format!(
+            "{d}:\\Program Files\\Git\\mingw64\\bin\\curl.exe"
+        )));
+        v.push(std::path::PathBuf::from(format!(
+            "{d}:\\Program Files (x86)\\Git\\mingw64\\bin\\curl.exe"
+        )));
+    }
+    // PATH 兜底
+    if let Ok(path) = std::env::var("PATH") {
+        for dir in path.split(';') {
+            if dir.is_empty() {
+                continue;
+            }
+            let p = std::path::Path::new(dir).join("curl.exe");
+            if p.exists() && !v.contains(&p) {
+                v.push(p);
+            }
+        }
+    }
+    v.into_iter().filter(|p| p.exists()).collect()
+}
+
+/// 用 curl 抓取 URL；依次尝试各候选 curl，首个成功即返回；全失败返回最后一条错误
+fn http_curl(url: &str, extra_args: &[&str]) -> Result<(std::process::Output, String), String> {
+    let candidates = curl_candidates();
+    if candidates.is_empty() {
+        return Err("未找到 curl.exe（需 Windows 10 1803+ 自带或已安装 Git）".into());
+    }
+    let mut last_err = String::new();
+    for bin in candidates {
+        let mut cmd = std::process::Command::new(&bin);
+        cmd.args(["-fsSL", "--retry", "2", "--connect-timeout", "15"]);
+        cmd.args(extra_args);
+        cmd.arg(url);
+        match cmd.output() {
+            Ok(o) => {
+                if o.status.success() {
+                    return Ok((o, bin.display().to_string()));
+                }
+                last_err = format!(
+                    "curl({}) 失败: {}",
+                    bin.display(),
+                    String::from_utf8_lossy(&o.stderr).trim()
+                );
+            }
+            Err(e) => last_err = format!("curl({}) 无法启动: {}", bin.display(), e),
+        }
+    }
+    Err(last_err)
+}
+
+/// 拉取文本内容（更新清单 latest.json 用，Rust 侧无 CORS 限制）
+#[tauri::command]
+pub async fn download_text(url: String) -> Result<String, String> {
+    let (out, _bin) = http_curl(&url, &[])?;
+    String::from_utf8(out.stdout).map_err(|e| format!("响应不是 UTF-8: {e}"))
+}
+
+/// 下载文件到本地（安装包用）：curl -o dest，返回落盘字节数
+fn download_file_impl(url: &str, dest: &str) -> Result<u64, String> {
+    let (_out, _bin) = http_curl(url, &["-o", dest, "--create-dirs"])?;
+    std::fs::metadata(dest)
+        .map(|m| m.len())
+        .map_err(|e| format!("下载完成但读取文件失败: {e}"))
+}
+
+#[tauri::command]
+pub async fn download_file(url: String, dest: String) -> Result<u64, String> {
+    download_file_impl(&url, &dest)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // 联网冒烟测试（默认 #[ignore]，需手动运行：cargo test -- --ignored updater -- --nocapture）：
+    // 验证 Rust curl 路径能拉取清单/下载安装包。默认打真实 GitHub；
+    // 可用环境变量 JY_E2E_M_URL / JY_E2E_B_URL 重定向到本地 HTTP 服务器（沙箱 schannel 受限时用）。
+    // 依赖网络与外部服务，CI/离线环境跳过。
+
+    #[test]
+    #[ignore]
+    fn download_text_real_github() {
+        let url = std::env::var("JY_E2E_M_URL").unwrap_or_else(|_| {
+            "https://github.com/cttailearn/jianreader/releases/latest/download/latest.json"
+                .to_string()
+        });
+        let (out, bin) = http_curl(&url, &[]).expect("curl 应能拉取清单");
+        let body = String::from_utf8_lossy(&out.stdout);
+        assert!(body.contains("0.3.0"), "清单应含版本号；实际: {}", &body[..body.len().min(160)]);
+        eprintln!("[e2e] download_text OK via {bin}");
+    }
+
+    #[test]
+    #[ignore]
+    fn download_file_real_github() {
+        let url = std::env::var("JY_E2E_B_URL").unwrap_or_else(|_| {
+            "https://github.com/cttailearn/jianreader/releases/latest/download/jianreader-setup_0.3.0_x64-setup.exe"
+                .to_string()
+        });
+        let dest_str = std::env::var("JY_E2E_DEST").unwrap_or_else(|_| {
+            std::env::temp_dir()
+                .join("jy-e2e-setup.exe")
+                .to_string_lossy()
+                .into_owned()
+        });
+        let bytes = download_file_impl(&url, &dest_str).expect("安装包应可下载");
+        assert!(bytes == 4_427_554, "安装包大小应=4427554，实际 {bytes}");
+        let _ = std::fs::remove_file(&dest_str);
+        eprintln!("[e2e] download_file OK: {bytes} bytes");
+    }
 
     #[test]
     fn b64_roundtrip() {

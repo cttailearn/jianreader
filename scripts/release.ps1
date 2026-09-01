@@ -1,4 +1,4 @@
-﻿<#
+<#
   简阅 发布脚本：构建安装包 → 计算 SHA-256 → 生成更新清单 latest.json → GitHub Release 发布指引
 
   更新机制：应用启动/手动检查时读取
@@ -69,10 +69,12 @@ $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exeCopy).Hash.ToLower()
 Write-Host "==> SHA-256：$hash"
 
 # ---------- 5. 生成 latest.json ----------
+$exeSize = (Get-Item -LiteralPath $exeCopy).Length
 $manifest = [ordered]@{
   version = [string]$Version
   url     = "https://github.com/cttailearn/jianreader/releases/latest/download/$assetsName"
   sha256  = $hash
+  size    = $exeSize
   notes   = $Notes
 }
 $manifestPath = Join-Path $OutDir "latest.json"
