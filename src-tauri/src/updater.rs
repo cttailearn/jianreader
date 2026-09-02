@@ -3,6 +3,20 @@
 
 use tauri::{AppHandle, Manager};
 
+/// Windows 下给子进程加 CREATE_NO_WINDOW，避免 curl.exe / powershell 之类的
+/// 控制台程序在应用运行时弹出黑窗（影响体验）；非 Windows 为空操作
+fn no_window(cmd: &mut std::process::Command) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = cmd;
+    }
+}
+
 /// RFC 4648 base64 解码（纯 std，供分块写入安装包用）
 fn b64_decode(s: &str) -> Result<Vec<u8>, String> {
     let compact: String = s.chars().filter(|c| !c.is_whitespace()).collect();
@@ -114,10 +128,10 @@ pub async fn sha256_file(path: String) -> Result<String, String> {
             path.replace('\'', "''")
         );
         let encoded = b64_encode(&utf16le(&script));
-        let out = std::process::Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-EncodedCommand", &encoded])
-            .output()
-            .map_err(|e| format!("计算校验和失败: {e}"))?;
+        let mut pwsh = std::process::Command::new("powershell");
+        pwsh.args(["-NoProfile", "-NonInteractive", "-EncodedCommand", &encoded]);
+        no_window(&mut pwsh);
+        let out = pwsh.output().map_err(|e| format!("计算校验和失败: {e}"))?;
         if !out.status.success() {
             return Err(format!(
                 "计算校验和失败: {}",
@@ -198,6 +212,7 @@ fn http_curl(url: &str, extra_args: &[&str]) -> Result<(std::process::Output, St
         cmd.args(["-fsSL", "--retry", "2", "--connect-timeout", "15"]);
         cmd.args(extra_args);
         cmd.arg(url);
+        no_window(&mut cmd);
         match cmd.output() {
             Ok(o) => {
                 if o.status.success() {
