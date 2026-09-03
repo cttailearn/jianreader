@@ -1,6 +1,6 @@
 # 简阅 —— 技术方案设计文档
 
-> 状态：方案已确认，待开发
+> 状态：核心功能已实现（M1~M9 + 安全/性能加固，见 CHANGELOG.md）；本文件部分章节（尤以 §5 结构与 §9 里程碑）与实际实现存在差异，**以源码为准**。
 > 决策记录：Tauri 2.x / 混合双内核（CodeMirror 6 + Milkdown）/ 编码检测必带 / 自定义顶栏 / 默认隐藏噪音目录 / 安装包+绿色版 / 手动保存为主+可开自动 / 小说模式：仅 txt（epub 远期）、米黄护眼默认背景、自动进入可随时退出
 
 ---
@@ -287,47 +287,59 @@ ready/dirty ─磁盘上被删除→ deleted（标签灰化 + 提示，保存时
 
 ```
 文本查看编辑器/
-├── design.md                 # 本文档
+├── design.md                 # 本文档（部分章节已过时，以源码为准）
 ├── index.html
 ├── package.json
 ├── vite.config.ts
 ├── src/                      # 前端
 │   ├── main.tsx
-│   ├── App.tsx               # 布局：目录树 | 标签页区 | 状态栏
+│   ├── App.tsx               # 布局：目录树 | 标签页区 | 状态栏 + 关窗拦截（close-requested）
+│   ├── theme-init.ts         # 防主题闪烁（模块化，替代内联脚本以适配 CSP）
 │   ├── components/
-│   │   ├── TopBar.tsx        # 顶栏（目录名/新建/刷新/大纲开关/主题）
-│   │   ├── FileTree.tsx      # 目录树（虚拟滚动 + 增量更新）
+│   │   ├── TopBar.tsx        # 顶栏（目录名/新建/刷新/大纲开关/主题/窗口控制）
+│   │   ├── FileTree.tsx      # 目录树（虚拟滚动 + 增量更新 + 右键菜单）
 │   │   ├── ChapterPanel.tsx  # 小说章节目录侧栏（解析结果/点击跳章）
 │   │   ├── TabBar.tsx        # 多标签
 │   │   ├── StatusBar.tsx
-│   │   ├── ExternalChangeBar.tsx  # 外部修改提示条
-│   │   └── TocPanel.tsx     # MD 大纲侧栏（生成/跳转/滚动跟随）
+│   │   ├── ExternalChangeBar.tsx  # 外部修改提示条（含分叉标记，R-13）
+│   │   ├── SettingsPanel.tsx # 设置（快捷键录制/自动保存/更新检查）
+│   │   ├── NovelReader.tsx   # 小说阅读视图（分章草稿编辑/阅读设置/查找替换）
+│   │   ├── ImageViewer.tsx   # 图片查看器
+│   │   └── TocPanel.tsx      # MD 大纲侧栏（生成/跳转/滚动跟随）
 │   ├── editors/
-│   │   ├── CodeEditor.tsx    # CodeMirror 6 封装（语言按需加载）
-│   │   ├── MarkdownEditor.tsx# Milkdown 封装（插件装配）
+│   │   ├── CodeEditor.tsx    # CodeMirror 6 封装（语言按需加载，themeComp 热切换主题）
+│   │   ├── MarkdownEditor.tsx# Milkdown 封装（插件装配 + 查找替换 + 图片隐私策略）
 │   │   └── index.tsx         # 按扩展名分发到对应内核
-│   ├── readers/
-│   │   └── NovelReader.tsx   # 小说阅读视图（章节渲染/编辑态/设置面板/查找替换）
 │   ├── stores/
-│   │   ├── tabs.ts           # 标签/文档状态（dirty、content、encoding…）
-│   │   ├── tree.ts           # 目录树状态（增量 patch）
-│   │   ├── reader.ts         # 阅读设置/书签/阅读进度（按路径记忆）
-│   │   └── theme.ts
+│   │   ├── tabs.ts           # 标签/文档状态机（dirty/externalModified/large）
+│   │   ├── tree.ts           # 目录树状态（增量 patch + 目录级聚合刷新）
+│   │   ├── novel.ts          # 小说阅读设置/分章草稿/书签（按路径记忆）
+│   │   ├── dialog.ts         # 自绘对话框（请求队列，R-14）
+│   │   ├── watcher.ts        # fs-event 分派（目录聚合，R-23）
+│   │   └── theme/settings/keymap/recent/session/updater/panels/ui/saveNovel/md
 │   ├── styles/
 │   │   ├── tokens.css        # 语义色 token（双主题）
 │   │   └── global.css
 │   └── utils/
-│       ├── language.ts       # 扩展名→语言映射
-│       ├── novel.ts          # 章节解析器（正则库 + 命中评分）
-│       └── tree.ts           # 树 diff/patch 算法
+│       ├── language.ts       # 扩展名→语言映射（动态导入，CM 内核不进首屏）
+│       ├── novel.ts          # 章节解析辅助
+│       ├── mdImage.ts        # MD 相对图片 ↔ asset URL 转换
+│       ├── format.ts         # 通用格式化
+│       └── updater.ts        # 更新器前端逻辑
 └── src-tauri/                # Rust 壳
     ├── Cargo.toml
-    ├── tauri.conf.json
-    ├── capabilities/default.json
+    ├── tauri.conf.json       # 含 CSP（prod 严格 / dev 宽松）
+    ├── capabilities/
+    │   ├── default.json      # 主窗口能力（含 create-webview-window）
+    │   └── workspace.json    # 多窗口工作区最小能力集（R-08）
     └── src/
-        ├── main.rs           # 窗口、命令注册
-        ├── fs.rs             # 读文件(编码检测)/写文件(原编码回写)
-        └── watcher.rs        # notify 目录监听 + 事件发射
+        ├── main.rs           # 入口
+        ├── lib.rs            # 命令注册 + 关窗拦截 + panic 诊断
+        ├── fs.rs             # 读写（编码检测/原编码回写/原子写）+ 路径作用域（R-07）+ 回收站删除
+        ├── novel.rs          # 章节流式扫描/按章懒加载/写回（R-10/R-11/R-16a/R-18）
+        ├── watcher.rs        # notify 监听（(label,path) 键 + 源过滤，R-12/R-23）
+        ├── updater.rs        # 更新：路径约束（R-06）
+        └── launch.rs         # 启动参数
 ```
 
 ---

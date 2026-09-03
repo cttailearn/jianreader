@@ -4,13 +4,17 @@
 //! M2：fs 命令（编码检测读写/目录列举/文件操作）。
 //! M3：watcher（目录监听，notify → fs-event 推送）。
 //! M6：启动自检（WebView2 缺失检测 + panic 诊断），绿色版闪退可定位。
-//! M13：轻量更新器（updater.rs）：前端下载 → base64 落盘 → SHA-256（PowerShell）→ 静默安装。
+//! M13：轻量更新器（updater.rs）：前端下载 → 校验 → 静默安装。
+//! R-02：关窗 dirty 拦截（CloseRequested → 前端确认 → finalize_close）
+//! R-05/R-07：FsScope 路径作用域状态
 
 mod fs;
 mod launch;
 mod novel;
 mod updater;
 mod watcher;
+
+use tauri::Emitter;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -24,6 +28,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(watcher::WatchState::default())
+        .manage(fs::FsScope::default())
         .invoke_handler(tauri::generate_handler![
             fs::read_text_file,
             fs::write_text_file,
@@ -33,28 +38,39 @@ pub fn run() {
             fs::rename_path,
             fs::path_is_dir,
             fs::file_meta,
+            fs::fs_scope_allow,
             watcher::start_watch,
             watcher::stop_watch,
             watcher::stop_all_watches,
             novel::scan_chapters,
             novel::read_chapter,
             novel::write_chapter,
-            updater::prepare_update_dir,
-            updater::write_update_chunk,
-            updater::sha256_file,
             updater::download_text,
-            updater::download_file,
-            updater::install_update,
             launch::get_launch_path,
+            finalize_close,
         ])
+        // R-02：任意窗口请求关闭时先拦截，通知前端处理未保存修改
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.emit("close-requested", ());
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// 前端确认关闭后由命令真正销毁窗口（destroy 不触发 CloseRequested，避免递归）
+#[tauri::command]
+fn finalize_close(window: tauri::WebviewWindow) -> Result<(), String> {
+    window
+        .destroy()
+        .map_err(|e| format!("关闭窗口失败: {e}"))
 }
 
 /// 崩溃诊断：panic → stderr + 日志文件 + 弹窗提示（否则 release 无声闪退无法定位）
 fn setup_crash_reporting() {
     std::panic::set_hook(Box::new(|info| {
-        // stderr：命令行重定向（2> panic.txt）可捕获
         eprintln!("[jianyue-panic] {info}");
         let mut log_note = String::new();
         for var in ["LOCALAPPDATA", "TEMP"] {
@@ -94,24 +110,31 @@ fn setup_crash_reporting() {
 }
 
 /// WebView2 Runtime 存在性检测（绿色版拷到新机器时给出明确提示，而非闪退）
+/// R-16c：非 Windows 平台直接放行，避免跨平台构建「能编译不能跑」
 fn check_webview2() -> bool {
-    let candidates = [
-        r"C:\Program Files (x86)\Microsoft\EdgeWebView\Application",
-        r"C:\Program Files\Microsoft\EdgeWebView\Application",
-    ];
-    let found = candidates.iter().any(|d| {
-        std::fs::read_dir(d)
-            .map(|mut it| it.next().is_some())
-            .unwrap_or(false)
-    });
-    if !found {
-        #[cfg(target_os = "windows")]
-        msgbox(
-            "简阅 - 缺少运行环境",
-            "未检测到 Microsoft Edge WebView2 Runtime，无法启动。\n\n请安装 WebView2 Runtime（Windows 10/11 一般已自带）：\nhttps://developer.microsoft.com/microsoft-edge/webview2/",
-        );
+    #[cfg(not(target_os = "windows"))]
+    {
+        return true;
     }
-    found
+    #[cfg(target_os = "windows")]
+    {
+        let candidates = [
+            r"C:\Program Files (x86)\Microsoft\EdgeWebView\Application",
+            r"C:\Program Files\Microsoft\EdgeWebView\Application",
+        ];
+        let found = candidates.iter().any(|d| {
+            std::fs::read_dir(d)
+                .map(|mut it| it.next().is_some())
+                .unwrap_or(false)
+        });
+        if !found {
+            msgbox(
+                "简阅 - 缺少运行环境",
+                "未检测到 Microsoft Edge WebView2 Runtime，无法启动。\n\n请安装 WebView2 Runtime（Windows 10/11 一般已自带）：\nhttps://developer.microsoft.com/microsoft-edge/webview2/",
+            );
+        }
+        found
+    }
 }
 
 /// Windows 消息框（裸 FFI，避免引入额外依赖）

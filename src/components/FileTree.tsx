@@ -16,6 +16,7 @@ import { useTabsStore } from "../stores/tabs";
 import { showDialog } from "../stores/dialog";
 import { openWorkspace } from "../utils/openWorkspace";
 import { fileIcon } from "../utils/language";
+import { formatSize } from "../utils/format";
 
 interface MenuState {
 	x: number;
@@ -312,10 +313,4 @@ export default function FileTree() {
 			)}
 		</div>
 	);
-}
-
-export function formatSize(bytes: number): string {
-	if (bytes < 1024) return `${bytes} B`;
-	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-	return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }

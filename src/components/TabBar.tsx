@@ -18,6 +18,8 @@ export default function TabBar() {
 					<div
 						key={t.path}
 						className={"tab" + (t.path === activePath ? " active" : "")}
+						role="tab"
+						aria-selected={t.path === activePath}
 						onClick={() => activate(t.path)}
 						onAuxClick={(e) => {
 							if (e.button === 1) {
@@ -34,6 +36,7 @@ export default function TabBar() {
 						<button
 							className="tab-close"
 							title="关闭 (Ctrl+W)"
+							aria-label={`关闭标签 ${t.name}`}
 							onClick={(e) => {
 								e.stopPropagation();
 								void close(t.path);

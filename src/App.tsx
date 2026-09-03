@@ -168,6 +168,7 @@ export default function App() {
 		return () => {
 			cancelled = true;
 		};
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
 	// 会话持久化（防抖）：目录/标签/激活标签变化后落盘
@@ -244,6 +245,81 @@ export default function App() {
 		};
 	}, []);
 
+	// R-02：关窗 dirty 拦截 —— Rust 侧 CloseRequested 已被 prevent，前端处理未保存后再 finalize_close
+	useEffect(() => {
+		let un: (() => void) | undefined;
+		let running = false;
+		import("@tauri-apps/api/event")
+			.then(async ({ listen }) => {
+				un = await listen("close-requested", async () => {
+					if (running) return;
+					running = true;
+					const s = useTabsStore.getState();
+					const { useNovelStore } = await import("./stores/novel");
+					const dirty = s.tabs.filter(
+						(t) =>
+							t.status === "dirty" ||
+							t.status === "external-changed" ||
+							(t.isNovel && useNovelStore.getState().hasDirty(t.path)),
+					);
+					const { showDialog } = await import("./stores/dialog");
+					try {
+						if (dirty.length === 0) {
+							await invoke("finalize_close");
+							return;
+						}
+						const r = await showDialog({
+							title: "未保存的更改",
+							message: `有 ${dirty.length} 个文档存在未保存的修改。全部保存后退出？`,
+							buttons: [
+								{ id: "save", label: "保存并退出", danger: false },
+								{ id: "discard", label: "不保存退出", danger: true },
+								{ id: "cancel", label: "取消", danger: false },
+							],
+						});
+						if (r.button === "cancel") {
+							running = false;
+							return;
+						}
+						if (r.button === "save") {
+							await s.saveAll();
+						}
+						// 保存后仍有未保存（冲突/失败）→ 二次确认，避免静默丢失
+						const stillDirty = useTabsStore.getState().tabs.some(
+							(t) =>
+								t.status === "dirty" ||
+								t.status === "external-changed" ||
+								(t.isNovel &&
+									useNovelStore.getState().hasDirty(t.path)),
+						);
+						if (stillDirty) {
+							const r2 = await showDialog({
+								title: "仍有未保存修改",
+								message: "部分文档保存失败或保存后又修改，仍要退出吗？",
+								buttons: [
+									{ id: "exit", label: "仍要退出", danger: true },
+									{ id: "cancel", label: "再看看", danger: false },
+								],
+							});
+							if (r2.button === "cancel") {
+								running = false;
+								return;
+							}
+						}
+						await invoke("finalize_close");
+					} catch {
+						running = false;
+					}
+				});
+			})
+			.catch(() => {
+				/* 非 Tauri 环境忽略 */
+			});
+		return () => {
+			un?.();
+		};
+	}, []);
+
 	return (
 		<div className="app">
 			<TopBar />
@@ -259,9 +335,11 @@ export default function App() {
 				<section className="panel-center">
 					<TabBar />
 					<div className="editor-area">
-						{activeDoc && activeDoc.status === "external-changed" && (
-							<ExternalChangeBar path={activeDoc.path} />
-						)}
+						{activeDoc &&
+							(activeDoc.status === "external-changed" ||
+								activeDoc.externalModified) && (
+								<ExternalChangeBar path={activeDoc.path} />
+							)}
 						{activeDoc ? (
 							activeDoc.status === "error" ? (
 								<div className="editor-placeholder">
@@ -296,8 +374,13 @@ export default function App() {
 								<Suspense
 									fallback={<div className="editor-loading">⏳ 正在加载编辑器…</div>}
 								>
+									{/* R-26：仅 Markdown 所见即所得随主题重建；CodeEditor 用 themeComp 热切换，key 不参与 mode */}
 									<EditorHost
-										key={`${activeDoc.path}:${activeDoc.rev}:${activeDoc.mdView}:${mode}`}
+										key={
+											isMarkdownPath(activeDoc.path) && activeDoc.mdView === "wysiwyg"
+												? `${activeDoc.path}:${activeDoc.rev}:${activeDoc.mdView}:${mode}`
+												: `${activeDoc.path}:${activeDoc.rev}:${activeDoc.mdView}`
+										}
 										path={activeDoc.path}
 										content={activeDoc.content}
 										theme={mode}

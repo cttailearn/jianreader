@@ -1,0 +1,37 @@
+# R-27：基础 CI —— 前端类型检查 + 前端构建 + Rust 测试
+# 说明：简阅是 Windows 专属应用，Rust 侧使用平台条件编译（cfg(windows)），
+# linux 上仅跑不依赖平台 API 的逻辑测试；完整 Windows 打包建议另外配置 windows runner。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  frontend:
+    name: 前端检查与构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: 类型检查
+        run: npx tsc --noEmit
+      - name: ESLint
+        run: npx eslint src
+      - name: 前端构建
+        run: npm run build
+
+  rust:
+    name: Rust 测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust 单元/集成测试
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+        # 联网 e2e 与 50MB 基准为 #[ignore]，CI 默认跳过

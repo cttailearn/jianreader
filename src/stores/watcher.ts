@@ -1,8 +1,9 @@
 //! fs-event 监听与分派（Rust notify → 前端）
-//! - modify：打开中且未改 → 自动重载；已改 → 提示条
+//! - modify：打开中且未改 → 自动重载；已改 → 提示条（externalModified 持久标记，R-13）
 //! - remove：目录树父层刷新 + 打开中标签标记已删除
 //! - rename：目录树刷新 + 打开中标签路径迁移
 //! - create：目录树父层刷新（保存重建文件也走这里）
+//! - R-23：目录树刷新按「父目录」聚合去重，避免事件风暴下逐条全树遍历
 
 import { listen } from "@tauri-apps/api/event";
 import { useTabsStore } from "./tabs";
@@ -21,10 +22,22 @@ export async function initWatcher(): Promise<() => void> {
 	});
 }
 
+function dirname(p: string): string {
+	return p.replace(/[\\/][^\\/]*$/, "");
+}
+
 async function handleFsEvents(events: FsEvent[]) {
+	// 目录树刷新目标（父目录去重）
+	const refreshDirs = new Set<string>();
+
 	for (const ev of events) {
-		// 目录树增量更新（父目录已加载才刷新）
-		useTreeStore.getState().applyFsEvent(ev);
+		// 目录树：收集需要刷新的父目录
+		if (ev.kind === "create" || ev.kind === "remove") {
+			refreshDirs.add(dirname(ev.path));
+		} else if (ev.kind === "rename") {
+			if (ev.from_path) refreshDirs.add(dirname(ev.from_path));
+			refreshDirs.add(dirname(ev.path));
+		}
 
 		const s = useTabsStore.getState();
 		if (ev.kind === "modify") {
@@ -33,7 +46,7 @@ async function handleFsEvents(events: FsEvent[]) {
 			if (doc.status === "ready") {
 				void s.reload(ev.path); // 本地未改 → 自动重载
 			} else if (doc.status === "dirty") {
-				s.markExternalChanged(ev.path); // 本地已改 → 提示
+				s.markExternalChanged(ev.path); // 本地已改 → 提示（保留分叉标记）
 			}
 			continue;
 		}
@@ -65,5 +78,10 @@ async function handleFsEvents(events: FsEvent[]) {
 				else if (doc.status === "dirty") s.markExternalChanged(ev.path);
 			}
 		}
+	}
+
+	// R-23：整批父目录一次刷新（去重 + 仅命中已加载层）
+	if (refreshDirs.size > 0) {
+		useTreeStore.getState().refreshIfLoadedDirs([...refreshDirs]);
 	}
 }

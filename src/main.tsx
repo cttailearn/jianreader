@@ -1,3 +1,4 @@
+import "./theme-init"; // 防主题闪烁（优先于样式渲染执行）
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./styles/tokens.css";

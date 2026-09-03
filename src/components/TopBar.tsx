@@ -127,10 +127,11 @@ export default function TopBar() {
 	return (
 		<header className="topbar" onMouseDown={onBarMouseDown}>
 			{/* 交通灯：关闭 / 最小化 / 最大化（macOS 惯例） */}
-			<div className="mac-lights">
+			<div className="mac-lights" role="group" aria-label="窗口控制">
 				<button
 					className="mac-light mac-light-close"
 					title="关闭"
+					aria-label="关闭窗口"
 					onClick={() => void win().close()}
 				>
 					<span>×</span>
@@ -138,6 +139,7 @@ export default function TopBar() {
 				<button
 					className="mac-light mac-light-min"
 					title="最小化"
+					aria-label="最小化窗口"
 					onClick={() => void win().minimize()}
 				>
 					<span>−</span>
@@ -145,6 +147,7 @@ export default function TopBar() {
 				<button
 					className="mac-light mac-light-max"
 					title="最大化 / 还原"
+					aria-label="最大化或还原窗口"
 					onClick={() => void win().toggleMaximize()}
 				>
 					<span>＋</span>
@@ -245,6 +248,7 @@ export default function TopBar() {
 					<button
 						className="win-btn"
 						title="最小化"
+						aria-label="最小化窗口"
 						onClick={() => void win().minimize()}
 					>
 						─
@@ -252,6 +256,7 @@ export default function TopBar() {
 					<button
 						className="win-btn"
 						title="最大化 / 还原"
+						aria-label="最大化或还原窗口"
 						onClick={() => void win().toggleMaximize()}
 					>
 						□
@@ -259,6 +264,7 @@ export default function TopBar() {
 					<button
 						className="win-btn win-btn-close"
 						title="关闭 (Ctrl+W)"
+						aria-label="关闭窗口"
 						onClick={() => void win().close()}
 					>
 						✕

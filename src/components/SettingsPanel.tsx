@@ -13,12 +13,6 @@ import {
 	type KeyAction,
 } from "../stores/keymap";
 
-function fmtBytes(n: number): string {
-	if (n < 1024) return `${n} B`;
-	if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-	return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 function Switch({
 	checked,
 	onChange,
@@ -191,7 +185,7 @@ export default function SettingsPanel() {
 					</div>
 					<button
 						className="novel-btn"
-						disabled={updStatus === "checking" || updStatus === "downloading"}
+						disabled={updStatus === "checking"}
 						onClick={() => void upd.checkNow()}
 					>
 						{updStatus === "checking" ? "检查中…" : "检查更新"}
@@ -217,38 +211,11 @@ export default function SettingsPanel() {
 						</div>
 						<button
 							className="novel-btn"
-							onClick={() => void upd.startDownload()}
+							onClick={() => void upd.openRelease()}
+							title="用系统浏览器打开 GitHub Release 页手动下载安装"
 						>
-							下载并安装
+							前往下载
 						</button>
-					</div>
-				)}
-				{(updStatus === "downloading" || updStatus === "verifying") && (
-					<div className="settings-update-row">
-						<div className="update-progress-track">
-							<div
-								className="update-progress-fill"
-								style={{
-									width: `${
-										upd.total > 0
-											? Math.round(upd.progress * 100)
-											: 0
-									}%`,
-								}}
-							/>
-						</div>
-						<div className="settings-row-desc">
-							{updStatus === "verifying"
-								? `校验安装包中…`
-								: `${fmtBytes(upd.downloaded)}${
-										upd.total > 0 ? ` / ${fmtBytes(upd.total)}` : ""
-								  }`}
-						</div>
-					</div>
-				)}
-				{updStatus === "installing" && (
-					<div className="settings-row-desc settings-update-note">
-						🔄 更新已就绪，应用即将退出并完成安装，请稍后重新打开简阅。
 					</div>
 				)}
 				{updStatus === "upToDate" && (

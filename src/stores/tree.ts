@@ -36,6 +36,8 @@ interface TreeState {
 	/** 重载某一层（新建/删除/重命名后调用） */
 	refreshDir: (path: string) => Promise<void>;
 	refreshRoot: () => Promise<void>;
+	/** 目录级批量刷新（仅命中已加载层；前端事件聚合，R-23） */
+	refreshIfLoadedDirs: (dirs: string[]) => void;
 	/** M3：notify 事件增量更新（父目录已加载才刷新） */
 	applyFsEvent: (ev: FsEvent) => void;
 }
@@ -56,6 +58,12 @@ export const useTreeStore = create<TreeState>((set, get) => ({
 	expanded: new Set(),
 
 	openRoot: async (path) => {
+		// R-07：登记根目录（递归）到路径作用域，允许读取/写入其内部
+		try {
+			await invoke("fs_scope_allow", { path, recursive: true });
+		} catch {
+			/* 状态未就绪时忽略 */
+		}
 		const entries = await invoke<DirEntry[]>("read_dir_entries", {
 			path,
 			showHidden: useSettingsStore.getState().settings.showHidden,
@@ -165,6 +173,16 @@ export const useTreeStore = create<TreeState>((set, get) => ({
 	refreshRoot: async () => {
 		const p = get().rootPath;
 		if (p) await get().refreshDir(p);
+	},
+
+	/** 目录级批量刷新：仅命中已加载层；一次性处理整批目录（R-23 前端聚合） */
+	refreshIfLoadedDirs: (dirs: string[]) => {
+		const { root, refreshDir } = get();
+		if (!root) return;
+		for (const dir of new Set(dirs)) {
+			const node = findNode(root, dir);
+			if (node && node.loaded) void refreshDir(dir);
+		}
 	},
 
 	applyFsEvent: (ev) => {

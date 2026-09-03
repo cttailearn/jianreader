@@ -1,22 +1,38 @@
 //! 最近打开的目录（M10）：记录打开过的根目录，顶栏下拉快速选择
 //! localStorage 持久化；最新在前，去重，上限 10 条
+//! R-27：键统一 jianyue-*，兼容迁移旧键 tve-recent
 
 import { create } from "zustand";
 
-const KEY = "tve-recent";
+const LEGACY_KEY = "tve-recent";
+const KEY = "jianyue-recent";
 export const RECENT_MAX = 10;
 
 function load(): string[] {
 	try {
-		const raw = localStorage.getItem(KEY);
+		const raw = localStorage.getItem(KEY) ?? localStorage.getItem(LEGACY_KEY);
 		if (raw) {
 			const arr = JSON.parse(raw) as string[];
-			if (Array.isArray(arr)) return arr.filter((p) => typeof p === "string");
+			if (Array.isArray(arr)) {
+				const list = arr.filter((p) => typeof p === "string");
+				if (!localStorage.getItem(KEY) && LEGACY_KEY && localHas(LEGACY_KEY)) {
+					localStorage.setItem(KEY, JSON.stringify(list));
+				}
+				return list;
+			}
 		}
 	} catch {
 		/* ignore */
 	}
 	return [];
+}
+
+function localHas(k: string): boolean {
+	try {
+		return localStorage.getItem(k) !== null;
+	} catch {
+		return false;
+	}
 }
 
 function persist(list: string[]): void {

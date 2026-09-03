@@ -1,10 +1,11 @@
-//! 目录监听：notify（ReadDirectoryChangesW）→ 300ms 合并去重 → emit fs-event
+//! 目录监听：notify（ReadDirectoryChangesW）→ 合并去重 → emit fs-event
 //!
 //! 关键设计：
-//! - 事件循环线程持有 watcher，空闲 300ms 才 flush（事件风暴合并）
-//! - 保存回环抑制：write_text_file 成功后记录 (path, mtime) 白名单，
-//!   修改事件匹配 mtime 则跳过（区分「自己写」与「外部写」）
-//! - 换目录时旧线程在下次 flush 前检测 root 变化并退出（优雅停止）
+//! - 事件循环线程持有 watcher，300ms 合并（同时周期性检测停止条件，R-12）
+//! - 保存回环抑制：write_text_file 成功后记录 (path, mtime) 白名单，修改事件匹配 mtime 则跳过
+//! - 多窗口：每个 (window label, root) 独立建立 watcher，互不覆盖（R-12）
+//! - 源过滤：噪音目录（.git/node_modules/dist 等）的事件在 Rust 侧直接丢弃（R-23）
+//! - 所有互斥体做 poison 恢复，避免单点 panic 级联（R-12）
 
 use notify::{recommended_watcher, Event, RecursiveMode, RecommendedWatcher, Watcher};
 use serde::Serialize;
@@ -16,9 +17,16 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 const FLUSH_INTERVAL: Duration = Duration::from_millis(300);
 const IGNORE_TTL: Duration = Duration::from_secs(5);
+/// 事件风暴下单批上限：超过立即 flush（不等 300ms）
+const BATCH_HARD_LIMIT: usize = 512;
 
-/// 保存回环抑制白名单 + 监听根目录列表（M7：多窗口各自监听，互不覆盖）
-/// roots: (窗口 label, 根目录) —— 窗口销毁后对应监听自动退出（M9 审查修复）
+/// 噪音目录段（事件路径出现任一即丢弃，与 fs.rs 的 NOISE_DIRS 保持一致）
+const NOISE_SEGMENTS: [&str; 7] = [
+    "\\.git\\", "\\node_modules\\", "\\dist\\", "\\.svn\\", "\\.hg\\", "\\target\\", "\\.idea\\",
+];
+
+/// 保存回环抑制白名单 + 监听根目录列表
+/// roots: (窗口 label, 根目录) —— 窗口销毁后对应监听自动退出
 pub struct WatchState {
     pub ignore: Mutex<HashMap<String, (u128, Instant)>>,
     pub roots: Mutex<Vec<(String, String)>>,
@@ -50,12 +58,17 @@ pub fn register_saved(app: &AppHandle, path: &str) {
                     state
                         .ignore
                         .lock()
-                        .unwrap()
+                        .unwrap_or_else(|e| e.into_inner())
                         .insert(path.to_owned(), (n.as_nanos(), Instant::now()));
                 }
             }
         }
     }
+}
+
+/// 事件路径是否位于噪音目录内（源过滤，R-23）
+fn is_noise_path(path: &str) -> bool {
+    NOISE_SEGMENTS.iter().any(|seg| path.contains(seg))
 }
 
 #[tauri::command]
@@ -70,78 +83,113 @@ pub fn start_watch(
         return Err("不是有效的目录".into());
     }
     let label = window.label().to_owned();
-    // 已监听同路径：直接成功（幂等）
-    if state.roots.lock().unwrap().iter().any(|(_, r)| r == &path) {
+    // 幂等：同 (窗口, 路径) 已监听 → 直接成功（R-12：键含 label，同目录不同窗口各自监听）
+    if state
+        .roots
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .any(|(l, r)| l == &label && r == &path)
+    {
         return Ok(());
     }
     let (tx, rx) = mpsc::channel::<Result<Event, notify::Error>>();
-    let mut watcher =
-        recommended_watcher(move |res| {
+    let mut watcher = recommended_watcher(
+        move |res: Result<Event, notify::Error>| {
+            // 源过滤：噪音事件不进入通道（省 IPC 与前端计算）
+            if let Ok(ev) = &res {
+                if ev.paths.iter().any(|p| is_noise_path(&p.to_string_lossy())) {
+                    return;
+                }
+            }
             let _ = tx.send(res);
-        })
-        .map_err(|e| format!("创建监听器失败: {e}"))?;
+        },
+    )
+    .map_err(|e| format!("创建监听器失败: {e}"))?;
     watcher
         .watch(&root, RecursiveMode::Recursive)
         .map_err(|e| format!("监听目录失败: {e}"))?;
-    state.roots.lock().unwrap().push((label, path.clone()));
+    state
+        .roots
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push((label.clone(), path.clone()));
     // watcher move 进线程保活；线程退出时自动 drop 停止监听
-    std::thread::spawn(move || watch_loop(rx, app, path, watcher));
+    std::thread::spawn(move || watch_loop(rx, app, label, path, watcher));
     Ok(())
 }
 
 #[tauri::command]
-pub fn stop_watch(path: String, state: State<'_, WatchState>) -> Result<(), String> {
-    stop_watch_inner(&state, &path)
+pub fn stop_watch(
+    window: tauri::WebviewWindow,
+    path: String,
+    state: State<'_, WatchState>,
+) -> Result<(), String> {
+    let label = window.label().to_owned();
+    state
+        .roots
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|(l, r)| !(l == &label && r == &path));
+    Ok(())
 }
 
 /// 停止全部监听（关闭工作区用）
 #[tauri::command]
 pub fn stop_all_watches(state: State<'_, WatchState>) -> Result<(), String> {
-    state.roots.lock().unwrap().clear();
-    Ok(())
-}
-
-fn stop_watch_inner(state: &WatchState, path: &str) -> Result<(), String> {
-    state.roots.lock().unwrap().retain(|(_, r)| r != path);
+    state.roots.lock().unwrap_or_else(|e| e.into_inner()).clear();
     Ok(())
 }
 
 fn watch_loop(
     rx: mpsc::Receiver<Result<Event, notify::Error>>,
     app: AppHandle,
+    label: String,
     root: String,
     _watcher: RecommendedWatcher,
 ) {
     let mut pending: Vec<Event> = Vec::new();
+    let mut last_flush = Instant::now();
     loop {
-        match rx.recv_timeout(FLUSH_INTERVAL) {
+        // R-12：每次循环先查停止条件（事件风暴下也能及时退出）
+        if !is_current_root(&app, &root, &label) {
+            break;
+        }
+        // 排空已就绪事件
+        loop {
+            match rx.try_recv() {
+                Ok(Ok(ev)) => pending.push(ev),
+                Ok(Err(_)) => {}
+                Err(_) => break,
+            }
+        }
+        // 到达 300ms 或单批超限 → flush
+        if !pending.is_empty()
+            && (pending.len() >= BATCH_HARD_LIMIT || last_flush.elapsed() >= FLUSH_INTERVAL)
+        {
+            let batch: Vec<Event> = std::mem::take(&mut pending);
+            flush(&app, batch);
+            last_flush = Instant::now();
+        }
+        // 短暂等待，同时让出 CPU；disconnected 则退出
+        match rx.recv_timeout(Duration::from_millis(50)) {
             Ok(Ok(ev)) => pending.push(ev),
             Ok(Err(_)) => {}
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                // 根目录已切换/停止 → 退出线程（drop watcher）
-                if !is_current_root(&app, &root) {
-                    break;
-                }
-                if !pending.is_empty() {
-                    let batch: Vec<Event> = std::mem::take(&mut pending);
-                    flush(&app, batch);
-                }
-            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
 }
 
 /// root 是否仍在监听列表，且其所属窗口存活（窗口销毁 → 返回 false → 线程退出，防泄漏）
-fn is_current_root(app: &AppHandle, root: &str) -> bool {
+fn is_current_root(app: &AppHandle, root: &str, label: &str) -> bool {
     let state = app.state::<WatchState>();
-    let roots = state.roots.lock().unwrap();
-    for (label, r) in roots.iter() {
-        if r == root {
-            return app.get_webview_window(label).is_some();
-        }
+    let roots = state.roots.lock().unwrap_or_else(|e| e.into_inner());
+    let found = roots.iter().any(|(l, r)| l == label && r == root);
+    if !found {
+        return false;
     }
-    false
+    app.get_webview_window(label).is_some()
 }
 
 /// 合并去重并发射事件
@@ -162,7 +210,6 @@ fn flush(app: &AppHandle, events: Vec<Event>) {
                         RenameMode::From => rename_from.push(path),
                         RenameMode::To => rename_to.push(path),
                         RenameMode::Both => {
-                            // paths = [from, to]
                             if let Some(t) = ev.paths.get(1) {
                                 let to = t.to_string_lossy().into_owned();
                                 if let Some(f) = ev.paths.first() {
@@ -214,7 +261,6 @@ fn flush(app: &AppHandle, events: Vec<Event>) {
                     if is_own_write(&state, &path) {
                         continue; // 保存回环抑制
                     }
-                    // create 优先：新建文件伴随的写入不覆盖 create 事件
                     let keep_create = matches!(merged.get(&path), Some(e) if e.kind == "create");
                     if keep_create {
                         continue;
@@ -233,11 +279,16 @@ fn flush(app: &AppHandle, events: Vec<Event>) {
         }
     }
 
-    // 配对 rename：From 与 To 同父目录（同一批次通常相邻出现）
+    // 配对 rename：From 与 To 同父目录
     for to in rename_to {
-        let to_parent = Path::new(&to).parent().map(|p| p.to_string_lossy().into_owned());
+        let to_parent = Path::new(&to)
+            .parent()
+            .map(|p| p.to_string_lossy().into_owned());
         let pos = rename_from.iter().position(|f| {
-            Path::new(f).parent().map(|p| p.to_string_lossy().into_owned()) == to_parent
+            Path::new(f)
+                .parent()
+                .map(|p| p.to_string_lossy().into_owned())
+                == to_parent
         });
         if let Some(idx) = pos {
             let from = rename_from.remove(idx);
@@ -250,7 +301,6 @@ fn flush(app: &AppHandle, events: Vec<Event>) {
                 },
             );
         } else {
-            // 配不上（To 单独到达）：发 unpaired，前端仅刷新目录树
             merged.insert(
                 to.clone(),
                 FsEventPayload {
@@ -261,7 +311,6 @@ fn flush(app: &AppHandle, events: Vec<Event>) {
             );
         }
     }
-    // 残留 From：同样发 unpaired
     for from in rename_from {
         merged.insert(
             from.clone(),
@@ -277,7 +326,7 @@ fn flush(app: &AppHandle, events: Vec<Event>) {
     state
         .ignore
         .lock()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .retain(|_, (_, at)| at.elapsed() < IGNORE_TTL);
 
     if merged.is_empty() {
@@ -298,7 +347,7 @@ fn flush(app: &AppHandle, events: Vec<Event>) {
 
 /// 判断 modify 事件是否来自「自己保存」：路径 + mtime 都在白名单中
 fn is_own_write(state: &WatchState, path: &str) -> bool {
-    let guard = state.ignore.lock().unwrap();
+    let guard = state.ignore.lock().unwrap_or_else(|e| e.into_inner());
     let Some((mtime, at)) = guard.get(path) else {
         return false;
     };

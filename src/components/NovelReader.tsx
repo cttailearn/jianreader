@@ -33,6 +33,10 @@ export default function NovelReader({ path }: Props) {
 
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const textRef = useRef<HTMLDivElement | null>(null);
+	// R-24：恢复深位置滚动时，若目标超出已渲染窗口，逐次扩充重试的游标
+	const restoreTargetRef = useRef(0);
+	const restoreScrollRounds = useRef(0);
+	const restoreDoneRef = useRef(true);
 	const [showSettings, setShowSettings] = useState(false);
 	const [findOpen, setFindOpen] = useState(false);
 	const [findText, setFindText] = useState("");
@@ -42,6 +46,8 @@ export default function NovelReader({ path }: Props) {
 	// M12：跳转计数——每次用户查找/上一下操作自增，驱动滚动跳转
 	//（不依赖 findIdx 本身：单匹配时 idx 不变，但也要跳转）
 	const [jumpSeq, setJumpSeq] = useState(0);
+	// R-24：段落渐进渲染窗口（DOM 虚拟化）——初始只渲染一屏+缓冲，滚动/查找时扩展
+	const [renderCount, setRenderCount] = useState(INITIAL_PARAGRAPHS);
 	// 全书搜索结果 { chapterIdx, text, matches }
 	const [bookResults, setBookResults] = useState<
 		{ chapterIdx: number; matches: number }[]
@@ -64,6 +70,12 @@ export default function NovelReader({ path }: Props) {
 		}
 	}, [book?.chapterIdx, book?.loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
+	// R-24：段落表（含每段起始偏移，供查找跳转定位；仅渲染窗口内段落进 DOM）
+	const paragraphs = useMemo(
+		() => buildParagraphs(book?.chapterText ?? ""),
+		[book?.chapterText],
+	);
+
 	// 滚动位置实时记录（防抖写 store）+ 接近底部自动加载下一页（大章分页）
 	const onScroll = useCallback(() => {
 		const el = scrollRef.current;
@@ -72,13 +84,94 @@ export default function NovelReader({ path }: Props) {
 		// 距底 < 2400px 且未加载完 → 加载下一块
 		if (el.scrollHeight - el.scrollTop - el.clientHeight < 2400) {
 			void useNovelStore.getState().loadMore(path);
+			// R-24：接近已渲染底部 → 扩展段落窗口（渐进式虚拟化，避免一次性渲染几万行 <p>）
+			setRenderCount((c) => Math.min(paragraphs.length, c + PARAGRAPH_BATCH));
 		}
-	}, [path]);
+	}, [path, paragraphs.length]);
 
 	// dirty 集合同步到标签状态（圆点/关闭确认）
 	useEffect(() => {
 		useTabsStore.getState().setNovelDirty(path, (book?.dirtySet.size ?? 0) > 0);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [book?.dirtySet]);
+
+	// 查找栏快捷键（可自定义，M9）
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent) => {
+			const km = useKeymapStore.getState().keymap;
+			if (matchKey(e, km.findInReader)) {
+				e.preventDefault();
+				setFindOpen(true);
+			}
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, []);
+
+	// M12 + R-24：查找跳转 —— 先把目标匹配的段落纳入渲染窗口，再滚动到高亮
+	useEffect(() => {
+		if (!findText || jumpSeq === 0 || findMatches.length === 0) return;
+		const offset = findMatches[findIdx % findMatches.length];
+		const idx = paragraphIndexAt(paragraphs, offset);
+		if (idx >= 0 && idx >= renderCount) {
+			setRenderCount(Math.min(paragraphs.length, idx + PARAGRAPH_BATCH));
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [jumpSeq]);
+
+	// M12：滚动到高亮（renderCount 扩充后 mark 已渲染）
+	useEffect(() => {
+		if (!findText || jumpSeq === 0) return;
+		scrollRef.current
+			?.querySelector<HTMLElement>(".novel-text mark.find-active")
+			?.scrollIntoView({ block: "center", behavior: "smooth" });
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [findIdx, renderCount, jumpSeq]);
+
+	// ---- 章内查找（虚拟高亮：匹配段落重新渲染）----
+	const findMatches = useMemo(() => {
+		if (!findText || !book) return [];
+		const text = book.chapterText;
+		const out: number[] = [];
+		let idx = text.indexOf(findText);
+		while (idx >= 0) {
+			out.push(idx);
+			idx = text.indexOf(findText, idx + Math.max(1, findText.length));
+		}
+		return out;
+	}, [findText, book]);
+
+	// R-24：切章时重置渲染窗口 + 记录恢复目标（loadMore 追加不重置，随滚动渐进扩展）
+	useEffect(() => {
+		restoreScrollRounds.current = 0;
+		restoreDoneRef.current = false;
+		restoreTargetRef.current = book?.scrollPos ?? 0;
+		setRenderCount(INITIAL_PARAGRAPHS);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [book?.chapterIdx]);
+
+	// R-24：恢复深位置书签 —— 目标滚动位置超出已渲染窗口时，逐次扩充并重试（有界）；
+	// 完成后锁存（restoreDoneRef），不再与用户后续滚动抢占
+	useEffect(() => {
+		if (restoreDoneRef.current) return;
+		const el = scrollRef.current;
+		if (!el || !book || book.loading) return; // 内容未就绪时不恢复（等待 loading 翻转）
+		const target = restoreTargetRef.current;
+		if (target <= 0) {
+			restoreDoneRef.current = true;
+			return;
+		}
+		el.scrollTop = target;
+		const clampedAtBottom =
+			el.scrollHeight - el.scrollTop < 24 && el.scrollTop < target - 1;
+		if (clampedAtBottom && restoreScrollRounds.current < 40) {
+			restoreScrollRounds.current += 1;
+			setRenderCount((c) => Math.min(paragraphs.length, c + PARAGRAPH_BATCH));
+			return;
+		}
+		restoreDoneRef.current = true;
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [book?.chapterIdx, book?.loading, renderCount]);
 
 	if (!book) return null;
 	const ch = book.scan.chapters[book.chapterIdx];
@@ -106,53 +199,17 @@ export default function NovelReader({ path }: Props) {
 		"--novel-width": `${s.contentWidth}ch`,
 	} as React.CSSProperties;
 
-	/** 编辑态输入 → store（标 dirty） */
+	/** 编辑态输入 → store（标 dirty）。R-15：逐行 <div> 取 textContent 拼接，
+	 *  保留空格/缩进/空行，避免 innerText 的渲染级空白折叠改动原文。 */
 	const onInput = () => {
 		const el = textRef.current;
 		if (!el) return;
-		// contenteditable 的 innerText 保留换行
-		const text = el.innerText.replace(/\u00a0/g, " ");
-		setChapterText(path, text);
+		setChapterText(path, readEditableText(el));
 	};
 
 	const save = async () => {
 		await saveActiveNovel(path);
 	};
-
-	// 查找栏快捷键（可自定义，M9）
-	useEffect(() => {
-		const onKey = (e: KeyboardEvent) => {
-			const km = useKeymapStore.getState().keymap;
-			if (matchKey(e, km.findInReader)) {
-				e.preventDefault();
-				setFindOpen(true);
-			}
-		};
-		window.addEventListener("keydown", onKey);
-		return () => window.removeEventListener("keydown", onKey);
-	}, []);
-
-	// M12：查找/上一个/下一个时滚动跳转到当前高亮匹配
-	// （编辑态无高亮元素 → 自然不跳转；分页加载/编辑输入/切章不触发，避免打断阅读滚动）
-	useEffect(() => {
-		if (!findText || jumpSeq === 0) return;
-		scrollRef.current
-			?.querySelector<HTMLElement>(".novel-text mark.find-active")
-			?.scrollIntoView({ block: "center", behavior: "smooth" });
-	}, [jumpSeq]); // eslint-disable-line react-hooks/exhaustive-deps
-
-	// ---- 章内查找（虚拟高亮：匹配段落重新渲染）----
-	const findMatches = useMemo(() => {
-		if (!findText || !book) return [];
-		const text = book.chapterText;
-		const out: number[] = [];
-		let idx = text.indexOf(findText);
-		while (idx >= 0) {
-			out.push(idx);
-			idx = text.indexOf(findText, idx + Math.max(1, findText.length));
-		}
-		return out;
-	}, [findText, book?.chapterText]);
 
 	/** 展开全书：逐章扫描（懒加载章节文本） */
 	const searchBook = async () => {
@@ -165,13 +222,13 @@ export default function NovelReader({ path }: Props) {
 			if (i === book.chapterIdx) {
 				body = book.chapterText;
 			} else {
-				const { invoke } = await import("@tauri-apps/api/core");
-				body = await invoke<string>("read_chapter", {
+				const { readChapterText } = await import("../stores/novel");
+				body = await readChapterText(
 					path,
-					start: c.start,
-					end: c.end,
-					encoding: book.scan.encoding,
-				}).catch(() => "");
+					c.start,
+					c.end,
+					book.scan.encoding,
+				).catch(() => "");
 			}
 			let n = 0;
 			let idx = body.indexOf(text);
@@ -184,33 +241,45 @@ export default function NovelReader({ path }: Props) {
 		setBookResults(results);
 	};
 
-	/** 替换当前高亮匹配（本章） */
-	const replaceCurrent = () => {
-		if (!findText || findMatches.length === 0 || !book) return;
-		const i = findIdx % findMatches.length;
-		const at = findMatches[i];
+	/** 查找当前章内匹配偏移（重新基于 store 实时文本计算） */
+	const indexMatches = (text: string, findText: string): number[] => {
+		const out: number[] = [];
+		let idx = text.indexOf(findText);
+		while (idx >= 0) {
+			out.push(idx);
+			idx = text.indexOf(findText, idx + Math.max(1, findText.length));
+		}
+		return out;
+	};
+
+	/** 替换当前高亮匹配（本章）。R-15/R-04：替换前先完整加载该章，避免把未加载尾巴丢掉 */
+	const replaceCurrent = async () => {
+		if (!findText || findMatches.length === 0) return;
+		await useNovelStore.getState().ensureFullChapter(path);
+		const b = useNovelStore.getState().books.get(path);
+		if (!b) return;
+		const text = b.chapterText;
+		const matches = indexMatches(text, findText);
+		if (matches.length === 0) return;
+		const i = findIdx % matches.length;
+		const at = matches[i];
 		const next =
-			book.chapterText.slice(0, at) +
-			replaceText +
-			book.chapterText.slice(at + findText.length);
+			text.slice(0, at) + replaceText + text.slice(at + findText.length);
 		setChapterText(path, next);
 		setEditing(path, false); // contenteditable 是原生 DOM，替换后退出编辑态重渲染
 	};
 
-	/** 全部替换（本章） */
-	const replaceAll = () => {
-		if (!findText || findMatches.length === 0 || !book) return;
-		const next = book.chapterText.split(findText).join(replaceText);
+	/** 全部替换（本章，需先完整加载） */
+	const replaceAll = async () => {
+		if (!findText) return;
+		await useNovelStore.getState().ensureFullChapter(path);
+		const b = useNovelStore.getState().books.get(path);
+		if (!b) return;
+		if (!b.chapterText.includes(findText)) return;
+		const next = b.chapterText.split(findText).join(replaceText);
 		setChapterText(path, next);
 		setEditing(path, false);
 	};
-	const paragraphs = useMemo(() => {
-		const text = book?.chapterText ?? "";
-		return text
-			.split(/\r?\n/)
-			.map((l) => l.trim())
-			.filter((l) => l.length > 0);
-	}, [book?.chapterText]);
 
 	return (
 		<div className="novel-reader" style={styleVars}>
@@ -416,6 +485,9 @@ export default function NovelReader({ path }: Props) {
 						className="novel-text novel-editing"
 						contentEditable
 						suppressContentEditableWarning
+						role="textbox"
+						aria-multiline="true"
+						aria-label={`${ch?.title ?? path} 本章正文编辑区`}
 						onInput={onInput}
 						onBlur={() => {
 							setEditing(path, false);
@@ -440,12 +512,12 @@ export default function NovelReader({ path }: Props) {
 						onClick={enterEdit}
 						title={tabReadonly ? "文件为只读" : "点击编辑本章"}
 					>
-						{paragraphs.map((p, i) => {
+						{paragraphs.slice(0, renderCount).map((p, i) => {
 							const hl =
 								findText && findMatches.length > 0
-									? highlightText(p, findText, findIdx, findMatches)
+									? highlightText(p.text, findText, findIdx, findMatches)
 									: null;
-							return hl ? <p key={i}>{hl}</p> : <p key={i}>{p}</p>;
+							return hl ? <p key={i}>{hl}</p> : <p key={i}>{p.text}</p>;
 						})}
 					</div>
 				)}
@@ -465,6 +537,54 @@ export default function NovelReader({ path }: Props) {
 			</div>
 		</div>
 	);
+}
+
+/**
+ * R-15：从 contenteditable 读取正文。编辑区按行以顶层 <div> 建块，
+ * 取每行 textContent 用 \n 拼接，原样保留空格/缩进；无 <div> 时回退整块 textContent。
+ */
+function readEditableText(el: HTMLElement): string {
+	const divs = Array.from(el.querySelectorAll<HTMLElement>(":scope > div"));
+	if (divs.length > 0) {
+		return divs.map((d) => d.textContent ?? "").join("\n");
+	}
+	return el.textContent ?? "";
+}
+
+/** R-24：小说阅读段落渐进渲染参数（初始一屏+缓冲，滚动/查找时按批扩展） */
+const INITIAL_PARAGRAPHS = 400;
+const PARAGRAPH_BATCH = 400;
+
+/** 切分为「去空白非空行」段落，并记录每段起始字符偏移（查找跳转定位用） */
+function buildParagraphs(text: string): { text: string; start: number }[] {
+	const items: { text: string; start: number }[] = [];
+	let pos = 0;
+	for (const line0 of text.split(/\r?\n/)) {
+		const line = line0.trim();
+		if (line.length > 0) items.push({ text: line, start: pos });
+		pos += line0.length + 1;
+	}
+	return items;
+}
+
+/** 二分查找：包含 offset 字符位置的段落索引（无则 -1） */
+function paragraphIndexAt(
+	items: { text: string; start: number }[],
+	offset: number,
+): number {
+	let lo = 0;
+	let hi = items.length - 1;
+	let ans = -1;
+	while (lo <= hi) {
+		const m = (lo + hi) >> 1;
+		if (items[m].start <= offset) {
+			ans = m;
+			lo = m + 1;
+		} else {
+			hi = m - 1;
+		}
+	}
+	return ans;
 }
 
 /** 章内查找高亮（虚拟 DOM 渲染，不污染 contenteditable） */

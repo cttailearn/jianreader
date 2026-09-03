@@ -1759,6 +1759,9 @@ body {
 	margin: 0 0 var(--novel-para-spacing, 0.8em);
 	text-align: justify;
 	text-indent: 2em;
+	/* R-24：长文段落跳过屏外布局计算，缓解整本单章 DOM 全量驻留时的卡顿 */
+	content-visibility: auto;
+	contain-intrinsic-size: auto 1.6em;
 }
 
 .novel-text.novel-editing {

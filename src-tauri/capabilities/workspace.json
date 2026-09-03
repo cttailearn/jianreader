@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "default",
-  "description": "主窗口：核心 API + 目录选择对话框 + 资源管理器定位 + 创建多窗口工作区 + 拖拽",
-  "windows": ["main"],
+  "identifier": "workspace",
+  "description": "多窗口工作区最小能力集（R-08）：不包含创建新窗口，IO 命令在 Rust 侧以路径作用域校验",
+  "windows": ["workspace-*"],
   "permissions": [
     "core:default",
     "core:window:allow-close",
@@ -10,7 +10,6 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-start-dragging",
     "core:window:allow-destroy",
-    "core:webview:allow-create-webview-window",
     "dialog:default",
     "opener:default",
     "opener:allow-reveal-item-in-dir"

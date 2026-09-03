@@ -39,6 +39,9 @@ export default function PanelResizer({ side }: { side: "left" | "right" }) {
 	return (
 		<div
 			className={`panel-resizer ${side}`}
+			role="separator"
+			aria-orientation="vertical"
+			aria-label={side === "left" ? "调整左侧面板宽度" : "调整右侧面板宽度"}
 			onPointerDown={onPointerDown}
 			title="拖动调整宽度"
 		/>

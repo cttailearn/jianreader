@@ -1,8 +1,8 @@
 //! 扩展名 → 语言 ID + 按需动态加载器
 //! 语言包全部 dynamic import，首屏不打包；打开文件时才拉对应语言包
+//! R-22：@codemirror/language 仅作类型/动态导入，避免 CM6 内核被静态打进入口 chunk
 
-import { LanguageSupport, StreamLanguage } from "@codemirror/language";
-import type { StreamParser } from "@codemirror/language";
+import type { LanguageSupport, StreamParser } from "@codemirror/language";
 import type { Extension } from "@codemirror/state";
 
 type Loader = () => Promise<Extension>;
@@ -57,6 +57,10 @@ const LEGACY_MODULES = {
 const legacy =
 	(mod: string, name: string): Loader =>
 	async () => {
+		// R-22：运行时动态加载 @codemirror/language（避免静态依赖拉入 CM6 内核）
+		const { LanguageSupport, StreamLanguage } = await import(
+			"@codemirror/language"
+		);
 		const loader = LEGACY_MODULES[mod as keyof typeof LEGACY_MODULES];
 		if (!loader) throw new Error(`unknown legacy mode: ${mod}`);
 		const m = (await loader()) as Record<string, unknown>;

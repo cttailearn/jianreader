@@ -1,28 +1,32 @@
-//! 更新器前端逻辑（零新增依赖）：
-//!   1) 拉取 GitHub Releases 的 latest.json 清单（版本/下载地址/大小/SHA-256）
-//!   2) 下载安装包（实时进度）→ 磁盘 SHA-256 校验
-//!   3) 触发静默安装并退出应用
+//! 更新器前端逻辑（零新增依赖）—— 更新源为 GitHub Releases API：
+//!   1) 调 `releases/latest` API（走 Rust curl，无 CORS）：拿最新 tag_name(版本) + 安装包 digest(SHA-256)
+//!   2) 读取 Release 备注里的数字签名行 `sig: <base64>`，用内置公钥验签（version + sha256，R-06）
+//!   3) 版本 > 当前 → 横幅/设置页提示「前往下载」，点击用系统浏览器打开 GitHub Release 页手动安装
 //!
-//! 网络请求全部交给 Rust 侧用 curl 完成（Rust 无 CORS 限制），避开 GitHub 下载
-//! CDN 对浏览器跨域 fetch 不加 Access-Control-Allow-Origin 的问题。
+//! 不发布/依赖 latest.json，不做应用内下载、静默安装（安装改为去 Release 页手动）。
 
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
+import { verifyUpdateManifest } from "./updateVerify";
 
-/** 更新清单地址：每次 GitHub Release 都上传 latest.json 资产，经 releases/latest 固定取最新 */
-export const UPDATE_MANIFEST_URL =
-	"https://github.com/cttailearn/jianreader/releases/latest/download/latest.json";
+/** 更新检查地址：GitHub Releases latest API（GitHub 自动维护，无需额外清单文件） */
+export const UPDATE_API_URL =
+	"https://api.github.com/repos/cttailearn/jianreader/releases/latest";
+
+/** 兜底的 Release 页地址（API 未返回 html_url 时使用） */
+export const RELEASE_PAGE_URL =
+	"https://github.com/cttailearn/jianreader/releases/latest";
 
 export interface UpdateInfo {
-	/** 新版本号（如 0.3.0） */
+	/** 新版本号（如 0.3.1） */
 	version: string;
-	/** 安装包直链 */
+	/** Release 页地址，点击后用系统浏览器打开，手动下载安装 */
 	url: string;
-	/** 安装包 SHA-256（小写 hex） */
+	/** 安装包 SHA-256（小写 hex，来自 GitHub API digest，参与签名绑定） */
 	sha256: string;
-	/** 安装包字节数（可选，用于下载进度条） */
+	/** 安装包字节数（可选） */
 	size?: number;
-	/** 更新说明（可选） */
+	/** 更新说明（可选，来自 Release 备注，已去掉 sig 行） */
 	notes?: string;
 }
 
@@ -43,31 +47,85 @@ export function compareVersions(a: string, b: string): number {
 	return 0;
 }
 
-/** 拉取更新清单；解析失败抛错，由调用方呈现 */
-export async function fetchUpdateManifest(): Promise<UpdateInfo> {
-	// 走 Rust curl（无 CORS），返回 latest.json 文本
-	const text = (await invoke<string>("download_text", {
-		url: UPDATE_MANIFEST_URL,
-	})) as string;
-	let j: Partial<UpdateInfo>;
-	try {
-		j = JSON.parse(text) as Partial<UpdateInfo>;
-	} catch {
-		throw new Error("更新清单格式无效");
-	}
-	if (!j.version || !j.url || !j.sha256) {
-		throw new Error("更新清单格式无效");
-	}
-	return {
-		version: String(j.version),
-		url: String(j.url),
-		sha256: String(j.sha256).toLowerCase(),
-		size: typeof j.size === "number" ? j.size : undefined,
-		notes: typeof j.notes === "string" ? j.notes : undefined,
-	};
+interface GitHubAsset {
+	name?: string;
+	size?: number;
+	digest?: string;
+	browser_download_url?: string;
 }
 
-/** 检查是否有新版本；返回当前版本号 + 是否有可用更新 + 清单信息 */
+interface GitHubRelease {
+	tag_name?: string;
+	html_url?: string;
+	body?: string;
+	assets?: GitHubAsset[];
+}
+
+/** 选择安装包资产：优先 `*-setup_<v>_x64-setup.exe`，其次任意非 portable 的 .exe */
+function pickSetupAsset(assets: GitHubAsset[]): GitHubAsset | undefined {
+	return (
+		assets.find(
+			(a) =>
+				/-setup_-?[0-9].*x64-setup\.exe$/i.test(a.name ?? "") &&
+				!/portable/i.test(a.name ?? ""),
+		) ??
+		assets.find(
+			(a) => /\.exe$/i.test(a.name ?? "") && !/portable/i.test(a.name ?? ""),
+		)
+	);
+}
+
+/** 从 Release 备注提取 `sig: <base64>` 行 */
+function extractSig(body: string): string | undefined {
+	const m = body.match(/(?:^|\n)[ \t]*sig:[ \t]*([A-Za-z0-9+/=]+)/);
+	return m?.[1];
+}
+
+/** 去掉备注里的 sig 行（展示给用户的说明只用其余部分） */
+function stripSigLine(body: string): string | undefined {
+	const clean = body
+		.replace(/(?:^|\n)[ \t]*sig:[ \t]*[A-Za-z0-9+/=]+/m, "")
+		.trim();
+	return clean || undefined;
+}
+
+/** 拉取并校验更新信息；解析/签名校验失败抛错，由调用方呈现 */
+export async function fetchUpdateManifest(): Promise<UpdateInfo> {
+	// 走 Rust curl（无 CORS、无需认证），返回 GitHub Releases API 文本
+	const text = (await invoke<string>("download_text", {
+		url: UPDATE_API_URL,
+	})) as string;
+	let j: GitHubRelease;
+	try {
+		j = JSON.parse(text) as GitHubRelease;
+	} catch {
+		throw new Error("更新信息读取失败（响应不是有效 JSON）");
+	}
+	const version = String(j.tag_name ?? "").replace(/^v/i, "");
+	if (!version) throw new Error("更新信息读取失败（缺少版本号）");
+	const asset = pickSetupAsset(j.assets ?? []);
+	if (!asset) throw new Error("未在最新 Release 中找到安装包资产");
+	const sha256 = String(asset.digest ?? "")
+		.replace(/^sha256:/i, "")
+		.toLowerCase();
+	if (!sha256) {
+		throw new Error("无法获取安装包 SHA-256（GitHub API 未返回 digest）");
+	}
+	const body = typeof j.body === "string" ? j.body : "";
+	const sig = extractSig(body);
+	if (!sig) {
+		throw new Error(
+			"该版本 Release 备注缺少数字签名（需含 `sig: …` 行）。请用 release.ps1 -Publish 重新发布（自动签名），或手动补签后重试。",
+		);
+	}
+	// R-06：用内置公钥验签（version + sha256），通过后才信任该版本信息并提示更新
+	await verifyUpdateManifest({ version, sha256, signature: sig });
+	const url = String(j.html_url ?? RELEASE_PAGE_URL);
+	const size = typeof asset.size === "number" ? asset.size : undefined;
+	return { version, url, sha256, size, notes: stripSigLine(body) };
+}
+
+/** 检查是否有新版本；返回当前版本号 + 是否有可用更新 + 发布信息 */
 export async function checkForUpdates(): Promise<{
 	available: boolean;
 	current: string;
@@ -76,53 +134,4 @@ export async function checkForUpdates(): Promise<{
 	const info = await fetchUpdateManifest();
 	const current = await getVersion();
 	return { available: compareVersions(info.version, current) > 0, current, info };
-}
-
-/**
- * 下载并安装新版本：Rust 侧 curl 下载 → 磁盘 SHA-256 校验 → 触发静默安装（应用随后退出）。
- * @param onPhase 阶段回调：downloading 下载 / verifying 校验 / installing 触发安装
- * @param onProgress downloaded 字节数 / total 字节数（total 为 0 表示未知，供不确定进度）
- */
-export async function downloadAndInstall(
-	info: UpdateInfo,
-	onPhase: (phase: "downloading" | "verifying" | "installing") => void,
-	onProgress: (downloaded: number, total: number) => void,
-): Promise<void> {
-	onPhase("downloading");
-
-	// 1) 文件目标
-	const dir = (await invoke<string>("prepare_update_dir")) as string;
-	const destPath = `${dir}\\jianreader-setup_${info.version}.exe`;
-
-	// 2) Rust 下载（无 CORS）；同时轮询落盘大小驱动进度条
-	let timer: ReturnType<typeof setInterval> | undefined;
-	if (info.size && info.size > 0) {
-		timer = setInterval(() => {
-			const total = info.size ?? 0;
-			invoke<[number, boolean]>("file_meta", { path: destPath })
-				.then(([sz]) => onProgress(Math.min(sz, total), total))
-				.catch(() => {
-					/* 文件尚未出现，忽略 */
-				});
-		}, 600);
-	}
-	try {
-		await invoke("download_file", { url: info.url, dest: destPath });
-	} finally {
-		if (timer) clearInterval(timer);
-	}
-	onProgress(info.size ?? 0, info.size ?? 0);
-
-	// 3) 磁盘级 SHA-256 校验（Rust 走 PowerShell，不依赖 webcrypto 环境）
-	onPhase("verifying");
-	const diskHash = (await invoke<string>("sha256_file", { path: destPath })) as string;
-	if (diskHash !== info.sha256) {
-		// 清掉坏文件
-		await invoke("delete_path", { path: destPath }).catch(() => {});
-		throw new Error("安装包下载后校验失败（SHA-256 不匹配），已中止");
-	}
-
-	// 4) 触发静默安装（内部等待后退出本进程；正常情况调用不会正常返回）
-	onPhase("installing");
-	await invoke("install_update", { path: destPath });
 }

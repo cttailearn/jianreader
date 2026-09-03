@@ -1,4 +1,4 @@
-//! 新版本提示横幅（右下角，非侵入）：启动自动检查发现新版本时出现
+//! 新版本提示横幅（右下角，非侵入）：启动自动检查发现新版本时出现，点击前往 Release 页手动安装
 
 import { useUpdaterStore } from "../stores/updater";
 
@@ -6,7 +6,7 @@ export default function UpdateNotice() {
 	const status = useUpdaterStore((s) => s.status);
 	const banner = useUpdaterStore((s) => s.banner);
 	const info = useUpdaterStore((s) => s.info);
-	const startDownload = useUpdaterStore((s) => s.startDownload);
+	const openRelease = useUpdaterStore((s) => s.openRelease);
 	const dismissBanner = useUpdaterStore((s) => s.dismissBanner);
 
 	if (!banner || status !== "available" || !info) return null;
@@ -25,9 +25,10 @@ export default function UpdateNotice() {
 			</div>
 			<button
 				className="novel-btn update-notice-btn"
-				onClick={() => void startDownload()}
+				onClick={() => void openRelease()}
+				title="用系统浏览器打开 GitHub Release 页手动下载安装"
 			>
-				下载更新
+				前往下载
 			</button>
 			<button
 				className="icon-btn update-notice-close"

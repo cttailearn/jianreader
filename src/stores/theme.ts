@@ -2,12 +2,21 @@ import { create } from "zustand";
 
 export type ThemeMode = "light" | "dark";
 
-const STORAGE_KEY = "tve-theme";
+// R-27：localStorage 键统一 jianyue-* 命名空间；兼容迁移旧键 tve-theme
+const LEGACY_STORAGE_KEY = "tve-theme";
+const STORAGE_KEY = "jianyue-theme";
 
 function loadInitial(): ThemeMode {
 	try {
-		const saved = localStorage.getItem(STORAGE_KEY);
-		if (saved === "light" || saved === "dark") return saved;
+		const saved =
+			localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
+		if (saved === "light" || saved === "dark") {
+			// 迁移：把旧键值写入新键
+			if (!localStorage.getItem(STORAGE_KEY)) {
+				localStorage.setItem(STORAGE_KEY, saved);
+			}
+			return saved;
+		}
 	} catch {
 		/* localStorage 不可用时回退默认 */
 	}

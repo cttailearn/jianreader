@@ -10,9 +10,9 @@ export default function DialogModal() {
 	const inputRef = useRef<HTMLInputElement>(null);
 
 	useEffect(() => {
-		setInput(open?.initialInput ?? "");
+		setInput(open?.req.initialInput ?? "");
 		// 输入框自动聚焦
-		if (open?.inputLabel) {
+		if (open?.req.inputLabel) {
 			setTimeout(() => inputRef.current?.focus(), 0);
 		}
 	}, [open]);
@@ -20,43 +20,49 @@ export default function DialogModal() {
 	if (!open) return null;
 
 	const cancelButton =
-		open.buttons.find((b) => b.id === "cancel") ??
-		open.buttons[open.buttons.length - 1];
+		open.req.buttons.find((b) => b.id === "cancel") ??
+		open.req.buttons[open.req.buttons.length - 1];
 
 	const onKeyDown = (e: React.KeyboardEvent) => {
 		if (e.key === "Enter" && !e.nativeEvent.isComposing) {
 			e.preventDefault();
-			answerDialog(open.buttons[0].id, input);
+			answerDialog(open.id, open.req.buttons[0].id, input);
 		} else if (e.key === "Escape") {
-			answerDialog(cancelButton.id, input);
+			answerDialog(open.id, cancelButton.id, input);
 		}
 	};
 
 	return (
 		<div
 			className="dialog-overlay"
+			role="dialog"
+			aria-modal="true"
+			aria-label={open.req.title}
 			onMouseDown={(e) => {
-				if (e.target === e.currentTarget) answerDialog(cancelButton.id, input);
+				if (e.target === e.currentTarget)
+					answerDialog(open.id, cancelButton.id, input);
 			}}
 		>
 			<div className="dialog-panel" onKeyDown={onKeyDown}>
-				<div className="dialog-title">{open.title}</div>
-				{open.message && <div className="dialog-message">{open.message}</div>}
-				{open.inputLabel !== undefined && (
+				<div className="dialog-title">{open.req.title}</div>
+				{open.req.message && (
+					<div className="dialog-message">{open.req.message}</div>
+				)}
+				{open.req.inputLabel !== undefined && (
 					<input
 						ref={inputRef}
 						className="dialog-input"
 						value={input}
 						onChange={(e) => setInput(e.target.value)}
-						placeholder={open.inputLabel}
+						placeholder={open.req.inputLabel}
 					/>
 				)}
 				<div className="dialog-buttons">
-					{open.buttons.map((b) => (
+					{open.req.buttons.map((b) => (
 						<button
 							key={b.id}
 							className={"dialog-btn" + (b.danger ? " danger" : "")}
-							onClick={() => answerDialog(b.id, input)}
+							onClick={() => answerDialog(open.id, b.id, input)}
 						>
 							{b.label}
 						</button>

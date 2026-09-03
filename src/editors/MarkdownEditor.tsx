@@ -316,6 +316,30 @@ export default function MarkdownEditor({
 		});
 		crepe.editor.use($prose(() => findPlugin));
 
+		// R-09：图片加载策略 —— 远端图片 no-referrer + 懒加载，降低文档外联追踪面
+		const imgPolicyKey = new PluginKey("jianyueImgPolicy");
+		const imgPolicy = new Plugin({
+			key: imgPolicyKey,
+			view(v) {
+				const apply = () => {
+					v.dom
+						.querySelectorAll<HTMLImageElement>("img")
+						.forEach((img) => {
+							img.setAttribute("referrerpolicy", "no-referrer");
+						});
+				};
+				apply();
+				const mo = new MutationObserver(apply);
+				mo.observe(v.dom, { childList: true, subtree: true });
+				return {
+					destroy: () => {
+						mo.disconnect();
+					},
+				};
+			},
+		});
+		crepe.editor.use($prose(() => imgPolicy));
+
 		// 大纲刷新：读 ctx.get(editorViewCtx) 当前视图（Crepe 初始化期间会替换 view，
 		// mounted 时捕获的旧引用会读到未完成解析的 doc——实测旧引用 doc 只有 5 个标题）
 		const refreshToc = () => {

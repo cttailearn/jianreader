@@ -55,10 +55,10 @@
 - **快捷键全部可自定义**：保存 / 打开目录 / 关闭标签 / 切换主题 / 下一个标签 / 阅读查找（点击录制 + 冲突检测）
 
 ### 🔄 软件更新
-- **启动自动检查 + 设置面板手动检查**：通过 GitHub Releases 检测新版本（可关闭自动检查）
-- 发现新版本 → 右下角横幅提示，一键下载（显示进度）→ **SHA-256 双重校验**（内存 + 写盘后）→ 静默安装 → 重启生效
-- 更新源：`https://github.com/cttailearn/jianreader/releases/latest/download/latest.json`
-- 实现在 `src/utils/updater.ts`（前端下载/校验）+ `src-tauri/src/updater.rs`（落盘/校验/静默安装），零新增依赖
+- **启动自动检查 + 设置面板手动检查**：通过 **GitHub Releases API**（`releases/latest`）检测新版本（可关闭自动检查）
+- 发现新版本 → 右下角横幅/设置面板提示「前往下载」，点击用系统默认浏览器打开 **GitHub Release 页**手动下载安装
+- **数字签名验签（R-06）**：发布时把 `sig: <base64>` 写入 Release 备注；应用先用内置公钥验签（版本 + 安装包 SHA-256），通过后才信任该版本信息并提示更新。**无需 latest.json**
+- 实现在 `src/utils/updater.ts`（API 获取/验签）+ `src/utils/updateVerify.ts`（WebCrypto 验签）+ `src-tauri/src/updater.rs`（`download_text` 无 CORS 拉取 API），零新增依赖
 
 ---
 
@@ -97,23 +97,36 @@ powershell -ExecutionPolicy Bypass -File scripts/package-portable.ps1
 
 ### 发布新版本（更新检查的物料）
 
-> 应用通过 `releases/latest/download/latest.json` 检查更新，因此每次发布**必须**把 `latest.json` 作为资产上传。
+> 更新来源是 **GitHub Releases API**（无需上传 latest.json）；发布后由 `release.ps1`/`scripts/sign-release.mjs` 把数字签名写入该 Release 的备注。
 
 ```bash
 # 1) 同步 bump 版本：package.json / src-tauri/Cargo.toml / src-tauri/tauri.conf.json 三处 version
+#    （release.ps1 会自动校验三处一致）
 
 # 2) 构建安装包（产物：src-tauri/target/release/bundle/nsis/jianreader-setup_<v>_x64-setup.exe）
 npm run tauri build
 
-# 3) 生成更新清单 latest.json + 绿色版便携 zip（含 version / url / sha256 / notes）到 .\release\
+# 3) 生成绿色版便携 zip + 签名密钥就绪（release/update-key.json，gitignore）
 powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Notes "更新说明"
 
-# 4) 发布：脚本自动用 gh CLI（需已登录）或按提示网页手动上传
+# 4) 发布：脚本创建 Release（exe + 绿色版），签名写入备注（需已登录 gh）
 powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Publish -Notes "..."
 #    网页方式：github.com/cttailearn/jianreader/releases/new
-#    Tag = vX.Y.Z，上传三个资产：jianreader-setup_<v>_x64-setup.exe、latest.json、
-#    jianreader-portable_<v>_x64.zip（绿色版，解压即用）
+#    Tag = vX.Y.Z，上传两个资产：jianreader-setup_<v>_x64-setup.exe、jianreader-portable_<v>_x64.zip
+#    发布后：gh api repos/cttailearn/jianreader/releases/tags/vX.Y.Z > info.json
+#            node scripts/sign-release.mjs --json info.json --notes "..." --out notes.txt
+#            gh release edit vX.Y.Z --notes (Get-Content notes.txt -Raw -Encoding UTF8)
 ```
+
+### 🔐 更新签名（R-06，ECDSA P-256）
+
+应用对「版本号 + 安装包 SHA-256」做**数字签名验签**，杜绝「同一 GitHub 源被整体替换/仓库账号被接管」的伪造面：
+
+- **机制**：发布时用私钥对 `version\nsha256` 签名（P1363 r||s，base64），把 `sig: <base64>` 追加到 Release 备注；客户端从 `releases/latest` API 读取 `tag_name`、安装包资产 `digest`、备注里的 `sig`，用内置公钥验签通过后才信任该版本信息并提示更新。**安装由用户点击「前往下载」打开 GitHub Release 页手动完成**（不做应用内下载/静默安装）。
+- **密钥**：私钥 `release/update-key.json`（gitignore，**务必备份并随机器迁移**）；公钥固化在 `src/utils/updateVerify.ts` 的 `UPGRADE_PUBLIC_JWK`。
+- **自动**：`release.ps1 -Publish` 创建 Release 后用 `scripts/sign-release.mjs` 自动签名并写入备注；脚本会校验「所用公钥与内置公钥一致」，不一致会告警（客户端将拒绝更新）。
+- **⚠️ 不要删除/重新生成密钥**：否则旧客户端将无法验签新版本。若确需换钥：生成 → 把新公钥粘贴到 `UPGRADE_PUBLIC_JWK` → 发一版带新公钥的 App → 后续才可用新钥发布。
+- 手动命令：`node scripts/update-key.mjs`（生成/打印公钥）、`node scripts/sign-release.mjs --json <release.json> --notes "..." --out notes.txt`（单独签名）、`node scripts/verify-manifest.mjs -f <清单>`（验签自检）。
 
 ### 技术栈
 
@@ -134,15 +147,15 @@ powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Publish -Notes "..
 │   ├── editors/          # CodeMirror / Milkdown 编辑器封装与分发
 │   ├── stores/           # zustand：tabs/tree/novel/settings/updater/keymap/theme...
 │   ├── styles/           # 语义色 token（双主题）+ 全局样式
-│   └── utils/            # 语言映射/章节解析辅助/md 图片与表格规范化/updater 下载校验
+│   └── utils/            # 语言映射/章节解析辅助/md 图片与表格规范化/updater 检查与验签
 ├── src-tauri/            # Rust 壳
 │   ├── src/fs.rs         # 读文件(编码检测)/写文件(原编码回写)/目录操作
 │   ├── src/novel.rs      # 章节流式扫描/按章懒加载/分页边界对齐
-│   ├── src/updater.rs    # 更新：base64 落盘/SHA-256(PowerShell)/静默安装+退出
+│   ├── src/updater.rs    # 更新：download_text（本机 curl 无 CORS 拉取 Releases API）
 │   ├── src/watcher.rs    # notify 目录监听（多根，窗口销毁自清理）
 │   └── src/lib.rs        # 命令注册 + WebView2 检测 + panic 诊断
 ├── scripts/package-portable.ps1  # 绿色版打包脚本
-└── scripts/release.ps1           # 发布：构建→sha256→latest.json→GitHub Release
+└── scripts/release.ps1           # 发布：构建→绿色版→GitHub Release（签名写备注）
 └── test-fixtures/        # UTF-8/GBK 小说测试样本
 ```
 

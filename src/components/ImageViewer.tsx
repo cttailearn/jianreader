@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { formatSize } from "./FileTree";
+import { formatSize } from "../utils/format";
 
 export default function ImageViewer({
 	path,

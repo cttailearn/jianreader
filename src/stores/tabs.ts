@@ -1,13 +1,14 @@
 //! 标签页/文档状态机（design.md 3.6）
 //! closed → loading → ready → dirty → (saving) → ready
 //! ready + 外部修改 → 自动重载（rev+1 重建编辑器）
-//! dirty + 外部修改 → external-changed（提示条）
+//! dirty + 外部修改 → external-changed（提示条；externalModified 持久标记分叉，R-13）
 //! 磁盘删除 → deleted（保存可重建）
 
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { getLanguage, isImagePath } from "../utils/language";
 import { useSettingsStore } from "./settings";
+import type { ScanResult } from "./novel";
 
 export type DocStatus =
 	| "loading"
@@ -36,12 +37,21 @@ export interface TabDoc {
 	isNovel: boolean;
 	/** 图片标签：以图片查看器渲染（不做文本解码） */
 	isImage: boolean;
-	/** 只读（磁盘只读属性 或 大文件保护），禁止编辑/保存 */
+	/** 只读（磁盘只读属性），禁止编辑/保存 */
 	readonly: boolean;
-	/** 只读原因：disk 磁盘属性 / large 超过 5MB 保护 */
-	readonlyReason?: "disk" | "large";
+	/** 只读原因：disk 磁盘属性 */
+	readonlyReason?: "disk";
+	/** 大文件标记（>8MB）：提示内存占用（R-17） */
+	large?: boolean;
+	/** 已被逐出内存（内容为空，切回时重读，R-19） */
+	evicted?: boolean;
+	/** 磁盘分叉标记（外部修改后本地未加载或已分叉）：输入不清除，保存时需确认（R-13） */
+	externalModified?: boolean;
 	lastError?: string;
 }
+
+/** R-19：超过该大小（4MB）的非激活大文件标签会被逐出内容（仅留元数据，切回重读） */
+const EVICT_MIN = 4 * 1024 * 1024;
 
 interface FilePayload {
 	content: string;
@@ -50,6 +60,7 @@ interface FilePayload {
 	eol: string;
 	size: number;
 	readonly: boolean;
+	large: boolean;
 }
 
 function payloadToDoc(
@@ -68,48 +79,70 @@ function payloadToDoc(
 		rev: t.rev + 1,
 		readonly: p.readonly,
 		readonlyReason: p.readonly ? "disk" : undefined,
+		large: p.large,
+		evicted: false,
 		lastError: undefined,
 	};
+}
+
+/** R-19：对非激活的大文件（≥EVICT_MIN、ready、未编辑）标签逐出 content，仅保留元数据 */
+export function applyEviction(tabs: TabDoc[], activePath: string | null): TabDoc[] {
+	return tabs.map((t) => {
+		if (
+			t.path !== activePath &&
+			!t.isNovel &&
+			t.evicted !== true &&
+			t.size >= EVICT_MIN &&
+			t.status === "ready"
+		) {
+			return { ...t, content: "", evicted: true };
+		}
+		return t;
+	});
 }
 
 function basename(path: string): string {
 	return path.split(/[\\/]/).pop() ?? path;
 }
 
+function parentOf(path: string): string | null {
+	const m = path.replace(/[\\/][^\\/]*$/, "");
+	return m && m !== path ? m : null;
+}
+
+/** 登记路径作用域（R-07）：打开文件前放行其父目录读/写 */
+async function registerFileScope(path: string): Promise<void> {
+	const p = parentOf(path);
+	if (!p) return;
+	try {
+		await invoke("fs_scope_allow", { path: p, recursive: false });
+	} catch {
+		/* 忽略：状态未就绪时放行 */
+	}
+}
+
 interface TabsState {
 	tabs: TabDoc[];
 	activePath: string | null;
-	/** 打开文件（已打开则激活；带编码检测） */
 	openFile: (path: string) => Promise<void>;
-	activate: (path: string) => void;
-	/** 关闭标签；dirty 时返回 false 表示被用户取消 */
+	activate: (path: string) => Promise<void>;
 	close: (path: string) => Promise<boolean>;
-	/** 编辑器内容变更（自动标记 dirty；external-changed 保持提示态） */
+	/** 编辑器内容变更（自动标记 dirty；externalModified 保留分叉标记） */
 	updateContent: (path: string, content: string) => void;
-	/** 静默同步内容（不标 dirty）：编辑器解析规范化（如 GFM 任务列表 - → *）后同步 */
+	/** 静默同步内容（不标 dirty）：编辑器解析规范化后同步 */
 	syncContent: (path: string, content: string) => void;
 	save: (path: string) => Promise<boolean>;
 	saveAll: () => Promise<void>;
-	/** 外部修改且本地未改：重新读盘（rev+1） */
 	reload: (path: string) => Promise<void>;
-	/** 外部修改且本地已改：用户选择保留本地 → 回到 dirty */
 	keepLocal: (path: string) => void;
-	/** 外部修改且本地已改：标记提示态 */
 	markExternalChanged: (path: string) => void;
-	/** 磁盘删除：标记（dirty 内容保留，保存可重建） */
 	markDeleted: (path: string) => void;
-	/** 文件/目录改名：更新标签路径 */
 	renameTab: (fromPath: string, toPath: string) => void;
-	/** MD 视图模式切换（wysiwyg ↔ source） */
 	toggleMdView: (path: string) => void;
-	/** 小说标签脏状态同步（novel store 的 dirtySet → 标签状态） */
 	setNovelDirty: (path: string, dirty: boolean) => void;
-	/** 手动进入小说模式（txt 未自动命中时；force 扫描 ≥1 章即进入） */
 	enterNovelMode: (path: string) => Promise<boolean>;
-	/** 以阅读模式打开：先正常打开，未自动进入小说模式的 txt 强制进入（无章节按整本单章） */
 	openInReader: (path: string) => Promise<void>;
-	/** 退出小说模式：整读全文，转普通编辑标签 */
-	exitNovelMode: (path: string) => Promise<void>;
+	exitNovelMode: (path: string) => Promise<boolean>;
 }
 
 export const useTabsStore = create<TabsState>((set, get) => ({
@@ -119,9 +152,12 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 	openFile: async (path) => {
 		const existing = get().tabs.find((t) => t.path === path);
 		if (existing) {
-			set({ activePath: path });
+			// R-19：若该标签已被逐出，激活流程会先重读再切到它
+			await get().activate(path);
 			return;
 		}
+		// R-07：先登记路径作用域（读/写/删都在其父目录内被允许）
+		await registerFileScope(path);
 		const lang = getLanguage(path);
 		const doc: TabDoc = {
 			path,
@@ -139,8 +175,12 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 			status: "loading",
 			rev: 0,
 		};
-		set((s) => ({ tabs: [...s.tabs, doc], activePath: path }));
-		// 图片文件：不做文本解码，直接以图片标签打开（file_meta 取大小/只读）
+		// R-19：新增标签时同步逐出其它非激活大文件
+		set((s) => ({
+			tabs: applyEviction([...s.tabs, doc], path),
+			activePath: path,
+		}));
+		// 图片文件：不做文本解码，直接以图片标签打开
 		if (isImagePath(path)) {
 			try {
 				const [size, ro] = await invoke<[number, boolean]>("file_meta", { path });
@@ -169,29 +209,59 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 			}
 			return;
 		}
-		// txt → 尝试小说模式（章节扫描 ≥3 章自动进入，零打断）
+		// txt → 扫描一次并复用（R-21）：命中章节自动进入小说；否则普通读并复用编码/EOF
 		if (/\.txt$/i.test(path)) {
-			const { useNovelStore } = await import("./novel");
-			const isNovel = await useNovelStore.getState().loadBook(path);
-			if (isNovel) {
-				const scanReadonly =
-					useNovelStore.getState().books.get(path)?.scan.readonly ?? false;
+			const { useNovelStore, getReadingSettings } = await import("./novel");
+			const rs = getReadingSettings(path);
+			const scan = await invoke<ScanResult>("scan_chapters", {
+				path,
+				encodingOverride: rs.encoding || null,
+				customPattern: rs.chapterRegex || null,
+			}).catch(() => null);
+			if (scan) {
+				const isNovel = await useNovelStore
+					.getState()
+					.loadBook(path, false, scan);
+				if (isNovel) {
+					const scanReadonly =
+						useNovelStore.getState().books.get(path)?.scan.readonly ?? false;
+					set((s) => ({
+						tabs: s.tabs.map((t) =>
+							t.path === path
+								? {
+										...t,
+										isNovel: true,
+										status: "ready",
+										languageName: "小说",
+										readonly: scanReadonly,
+										readonlyReason: scanReadonly ? "disk" : undefined,
+										large: scan.total_bytes > 8 * 1024 * 1024,
+									}
+								: t,
+						),
+					}));
+					return;
+				}
+			}
+			try {
+				const p = await invoke<FilePayload>("read_text_file", {
+					path,
+					encodingOverride: scan?.encoding ?? null,
+					hasBomOverride: scan?.has_bom ?? null,
+				});
+				set((s) => ({
+					tabs: s.tabs.map((t) => (t.path === path ? payloadToDoc(t, p) : t)),
+				}));
+			} catch (e) {
 				set((s) => ({
 					tabs: s.tabs.map((t) =>
 						t.path === path
-							? {
-									...t,
-									isNovel: true,
-									status: "ready",
-									languageName: "小说",
-									readonly: scanReadonly,
-									readonlyReason: scanReadonly ? "disk" : undefined,
-								}
+							? { ...t, status: "error", lastError: String(e) }
 							: t,
 					),
 				}));
-				return;
 			}
+			return;
 		}
 		try {
 			const p = await invoke<FilePayload>("read_text_file", { path });
@@ -207,17 +277,47 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 		}
 	},
 
-	activate: (path) => set({ activePath: path }),
+	activate: async (path) => {
+		// R-19：先切到目标标签（并逐出其它非激活大文件）；若目标曾被逐出，再异步重读
+		const wasEvicted = get().tabs.find((t) => t.path === path)?.evicted ?? false;
+		set((s) => ({
+			...s,
+			activePath: path,
+			tabs: applyEviction(s.tabs, path).map((t) =>
+				t.path === path && wasEvicted
+					? { ...t, status: "loading" as DocStatus }
+					: t,
+			),
+		}));
+		if (!wasEvicted) return;
+		try {
+			const p = await invoke<FilePayload>("read_text_file", { path });
+			set((s) => ({
+				tabs: s.tabs.map((t) => (t.path === path ? payloadToDoc(t, p) : t)),
+			}));
+		} catch (e) {
+			set((s) => ({
+				tabs: s.tabs.map((t) =>
+					t.path === path
+						? { ...t, evicted: false, status: "error", lastError: String(e) }
+						: t,
+				),
+			}));
+		}
+	},
 
 	close: async (path) => {
 		const doc = get().tabs.find((t) => t.path === path);
 		if (!doc) return true;
 		cancelAutosave(path);
-		if (doc.status === "dirty" || doc.status === "external-changed") {
+		// 小说脏状态：status 可能未即时同步，双保险
+		const novelDirty =
+			doc.isNovel && (await import("./novel")).useNovelStore.getState().hasDirty(path);
+		if (doc.status === "dirty" || doc.status === "external-changed" || novelDirty) {
 			const { showDialog } = await import("./dialog");
 			const r = await showDialog({
 				title: "未保存的更改",
-				message: `「${doc.name}」已修改，是否保存？`,
+				message: `「${doc.name}」已修改，是否保存？（小说将保存全部已修改章节）`,
 				buttons: [
 					{ id: "save", label: "保存", danger: false },
 					{ id: "discard", label: "不保存", danger: true },
@@ -230,7 +330,6 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 				if (!ok) return false;
 			}
 		}
-		// 小说标签：关闭前记录续读位置并卸载 book（防 books map 泄漏，M9 审查）
 		if (doc.isNovel) {
 			const { useNovelStore } = await import("./novel");
 			useNovelStore.getState().unloadBook(path);
@@ -244,6 +343,11 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 			}
 			return { tabs, activePath };
 		});
+		// R-19：关闭后新激活的标签若曾被逐出 → 经 activate 重读（并逐出其它非激活大文件）
+		const na = get().activePath;
+		if (na && na !== path && get().tabs.find((t) => t.path === na)?.evicted) {
+			void get().activate(na);
+		}
 		return true;
 	},
 
@@ -252,8 +356,8 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 			tabs: s.tabs.map((t) => {
 				if (t.path !== path || t.status === "saving" || t.content === content)
 					return t;
+				// R-13：externalModified 不被输入清除（分叉事实保留，保存时确认）
 				const next = { ...t, content, status: "dirty" as DocStatus };
-				// 自动保存（设置开启时 dirty 后 2s 自动写盘，M9）
 				if (useSettingsStore.getState().settings.autoSave && !next.readonly) {
 					scheduleAutosave(get, path);
 				}
@@ -274,26 +378,30 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 		const doc = get().tabs.find((t) => t.path === path);
 		if (!doc || doc.status === "saving") return false;
 		cancelAutosave(path);
-		// 只读文件拦截（磁盘只读 / 大文件保护）
 		if (doc.readonly) {
 			const { showDialog } = await import("./dialog");
 			await showDialog({
 				title: "无法保存",
-				message: `「${doc.name}」为只读文件（${
-					doc.readonlyReason === "large" ? "超过 5MB 保护" : "磁盘只读属性"
-				}），无法保存。`,
+				message: `「${doc.name}」为只读文件（磁盘只读属性），无法保存。`,
 				buttons: [{ id: "ok", label: "确定", danger: false }],
 			});
 			return false;
 		}
-		// 小说标签：按章写回（write_chapter + 重解析章节表）
+		// 小说标签：保存全部 dirty 章（R-01）
 		if (doc.isNovel) {
 			const { useNovelStore } = await import("./novel");
 			try {
 				const ok = await useNovelStore.getState().saveChapter(path);
-				if (!ok) return false;
-				get().setNovelDirty(path, false);
-				return true;
+				get().setNovelDirty(path, !ok);
+				if (!ok) {
+					const { showDialog } = await import("./dialog");
+					await showDialog({
+						title: "保存冲突",
+						message: "保存过程中文档仍有修改，已保留这些修改，请再次保存。",
+						buttons: [{ id: "ok", label: "确定", danger: false }],
+					});
+				}
+				return ok;
 			} catch (e) {
 				set((s) => ({
 					tabs: s.tabs.map((t) =>
@@ -311,19 +419,58 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 				return false;
 			}
 		}
+		// R-13：磁盘分叉确认
+		if (doc.externalModified) {
+			const { showDialog } = await import("./dialog");
+			const r = await showDialog({
+				title: "覆盖外部修改",
+				message: `「${doc.name}」在磁盘上已被外部修改，当前保存会用本地版本覆盖它。确认继续？`,
+				buttons: [
+					{ id: "overwrite", label: "覆盖", danger: true },
+					{ id: "cancel", label: "取消", danger: false },
+				],
+			});
+			if (r.button !== "overwrite") return false;
+		}
 		set((s) => ({
 			tabs: s.tabs.map((t) =>
 				t.path === path ? { ...t, status: "saving" as DocStatus } : t,
 			),
 		}));
+		// R-03：记录保存起点，写盘后对比，防止保存期间输入被静默丢弃
+		const contentAtStart = doc.content;
 		try {
 			const newSize = await invoke<number>("write_text_file", {
 				path,
-				content: doc.content,
+				content: contentAtStart,
 				encoding: doc.encoding,
 				hasBom: doc.hasBom,
 				eol: doc.eol,
 			});
+			const current = get().tabs.find((t) => t.path === path);
+			const changedDuringSave = !!current && current.content !== contentAtStart;
+			if (changedDuringSave) {
+				// 写盘期间用户继续输入：保留为新 dirty，并提示
+				set((s) => ({
+					tabs: s.tabs.map((t) =>
+						t.path === path
+							? {
+									...t,
+									status: "dirty" as DocStatus,
+									size: newSize,
+									externalModified: false,
+								}
+							: t,
+					),
+				}));
+				const { showDialog } = await import("./dialog");
+				await showDialog({
+					title: "保存冲突",
+					message: `「${doc.name}」保存时又有输入，未写入磁盘的部分已保留，请再次保存。`,
+					buttons: [{ id: "ok", label: "确定", danger: false }],
+				});
+				return false;
+			}
 			set((s) => ({
 				tabs: s.tabs.map((t) =>
 					t.path === path
@@ -332,6 +479,7 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 								status: "ready" as DocStatus,
 								lastError: undefined,
 								size: newSize,
+								externalModified: false,
 							}
 						: t,
 				),
@@ -370,7 +518,6 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 
 	reload: async (path) => {
 		const doc = get().tabs.find((t) => t.path === path);
-		// 小说标签：重扫章节表 + 重读当前章（不走全文 content）
 		if (doc?.isNovel) {
 			const { useNovelStore } = await import("./novel");
 			await useNovelStore.getState().reloadBook(path);
@@ -380,8 +527,16 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 		try {
 			const p = await invoke<FilePayload>("read_text_file", { path });
 			set((s) => ({
-				tabs: s.tabs.map((t) => (t.path === path ? payloadToDoc(t, p) : t)),
+				tabs: s.tabs.map((t) => {
+					if (t.path !== path) return t;
+					const next = payloadToDoc(t, p);
+					// 外部重载后清除分叉标记
+					next.externalModified = false;
+					return next;
+				}),
 			}));
+			// R-19：重载后对非激活大文件重新逐出（避免外部修改重载让内存短暂飙升后长期驻留）
+			set((s) => ({ tabs: applyEviction(s.tabs, s.activePath) }));
 		} catch {
 			// 读取失败（可能刚被删）→ 删除事件随后会标记
 		}
@@ -399,8 +554,8 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 	markExternalChanged: (path) =>
 		set((s) => ({
 			tabs: s.tabs.map((t) =>
-				t.path === path && t.status === "dirty"
-					? { ...t, status: "external-changed" as DocStatus }
+				t.path === path && (t.status === "ready" || t.status === "dirty")
+					? { ...t, status: "external-changed" as DocStatus, externalModified: true }
 					: t,
 			),
 		})),
@@ -422,7 +577,6 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 			),
 			activePath: s.activePath === fromPath ? toPath : s.activePath,
 		}));
-		// 小说标签：book 状态按新路径迁移（章节表/设置/书签键一致）
 		if (wasNovel) {
 			void import("./novel").then(({ useNovelStore }) =>
 				useNovelStore.getState().moveBook(fromPath, toPath),
@@ -462,7 +616,7 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 	enterNovelMode: async (path) => {
 		const doc = get().tabs.find((t) => t.path === path);
 		if (!doc) return false;
-		// 有未保存修改时先确认（阅读模式从磁盘读章，不带入内存内容）
+		// 有未保存修改时先确认
 		if (doc.status === "dirty" || doc.status === "external-changed") {
 			const { showDialog } = await import("./dialog");
 			const r = await showDialog({
@@ -502,6 +656,30 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 	},
 
 	exitNovelMode: async (path) => {
+		const { useNovelStore } = await import("./novel");
+		const st = useNovelStore.getState();
+		// R-01：退出前处理未保存修改
+		if (st.hasDirty(path)) {
+			const { showDialog } = await import("./dialog");
+			const r = await showDialog({
+				title: "未保存的更改",
+				message: "退出阅读模式前需处理未保存的章节修改。",
+				buttons: [
+					{ id: "save", label: "保存并退出", danger: false },
+					{ id: "discard", label: "放弃修改", danger: true },
+					{ id: "cancel", label: "取消", danger: false },
+				],
+			});
+			if (r.button === "cancel") return false;
+			if (r.button === "save") {
+				try {
+					const ok = await st.saveChapter(path);
+					if (!ok) return false;
+				} catch {
+					return false;
+				}
+			}
+		}
 		set((s) => ({
 			tabs: s.tabs.map((t) =>
 				t.path === path
@@ -509,8 +687,7 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 					: t,
 			),
 		}));
-		const { useNovelStore } = await import("./novel");
-		useNovelStore.getState().unloadBook(path);
+		st.unloadBook(path);
 		try {
 			const p = await invoke<FilePayload>("read_text_file", { path });
 			set((s) => ({
@@ -523,6 +700,7 @@ export const useTabsStore = create<TabsState>((set, get) => ({
 				),
 			}));
 		}
+		return true;
 	},
 }));
 

@@ -4,7 +4,7 @@ import { useThemeStore } from "../stores/theme";
 import { useTabsStore } from "../stores/tabs";
 import { useCursorStore } from "../stores/ui";
 import { useNovelStore } from "../stores/novel";
-import { formatSize } from "./FileTree";
+import { formatSize } from "../utils/format";
 import { isMarkdownPath } from "../utils/mdImage";
 // 版本号跟随 package.json（发版 bump 时状态栏自动更新）
 import pkg from "../../package.json";
@@ -75,13 +75,17 @@ export default function StatusBar() {
 					{doc.readonly && (
 						<span
 							className="statusbar-item statusbar-readonly"
-							title={
-								doc.readonlyReason === "large"
-									? "超过 5MB 已转只读保护"
-									: "磁盘只读属性"
-							}
+							title="磁盘只读属性"
 						>
 							🔒 只读
+						</span>
+					)}
+					{doc.large && !doc.isNovel && (
+						<span
+							className="statusbar-item statusbar-large"
+							title="文件较大，将占用较多内存；如需分章阅读 txt 请用「以阅读模式打开」"
+						>
+							⚠️ 大文件
 						</span>
 					)}
 					<span className="statusbar-item">
